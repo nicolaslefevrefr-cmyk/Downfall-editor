@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3d5af1">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>Éditeur de niveaux — Chute Libre</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="tgroup">
+      <button id="btnTogglePalette" class="tbtn drawerToggle">📦</button>
+      <button id="btnNewLevel" class="tbtn">+ Niveau</button>
+      <select id="levelSelect"></select>
+      <button id="btnRenameLevel" class="tbtn" title="Renommer le niveau">✎</button>
+      <button id="btnDeleteLevel" class="tbtn danger" title="Supprimer le niveau">🗑</button>
+    </div>
+    <div class="tgroup">
+      <button id="btnImport" class="tbtn">Importer JSON</button>
+      <input id="fileImport" type="file" accept="application/json" hidden>
+      <button id="btnExport" class="tbtn">Exporter JSON</button>
+      <label class="tcheck"><input id="chkGrid" type="checkbox" checked> Grille</label>
+    </div>
+    <div class="tgroup">
+      <button id="btnDuplicate" class="tbtn" disabled>⧉ Dupliquer</button>
+      <button id="btnDelete" class="tbtn danger" disabled>🗑 Supprimer</button>
+      <button id="btnPlay" class="tbtn primary">▶ Tester le niveau</button>
+      <button id="installBtn" class="tbtn" style="display:none;">⬇ Installer</button>
+      <button id="btnToggleInspector" class="tbtn drawerToggle">⚙️</button>
+    </div>
+  </header>
+
+  <div id="workspace">
+    <aside id="palette">
+      <h3>Bibliothèque d'objets</h3>
+      <div id="paletteList"></div>
+      <h3>Niveau courant</h3>
+      <div id="levelMeta"></div>
+    </aside>
+
+    <main id="canvasArea">
+      <div id="canvasWrap">
+        <canvas id="editorCanvas"></canvas>
+        <div id="playOverlayMsg"></div>
+        <div id="zoomBar">
+          <button id="btnZoomOut" class="tbtn">−</button>
+          <span id="zoomLabel">100%</span>
+          <button id="btnZoomIn" class="tbtn">+</button>
+          <button id="btnZoomReset" class="tbtn" title="Ajuster à l'écran">⤢</button>
+          <button id="btnPanMode" class="tbtn" title="Déplacer la vue (glisser)">🖐</button>
+        </div>
+      </div>
+    </main>
+
+    <aside id="inspector">
+      <div class="inspectorHeader">
+        <h3>Propriétés</h3>
+        <button id="btnCloseInspector" class="tbtn">✕</button>
+      </div>
+      <div id="inspectorBody"><p class="empty">Rien n'est sélectionné. Clique un objet sur la scène, ou choisis un élément dans la bibliothèque pour en poser un nouveau.</p></div>
+    </aside>
+  </div>
+
+  <footer id="playControls">
+    <div class="dpad">
+      <button id="btnLeft" class="ctrl">◀</button>
+      <button id="btnRight" class="ctrl">▶</button>
+    </div>
+    <button id="btnJump" class="ctrl ctrlJump">⤒</button>
+  </footer>
+</div>
+
+<script src="js/editor.js"></script>
+<script>
+if("serviceWorker" in navigator){
+  window.addEventListener("load", () => { navigator.serviceWorker.register("service-worker.js").catch(()=>{}); });
+}
+let __deferredPrompt = null;
+const __installBtn = document.getElementById("installBtn");
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault(); __deferredPrompt = e; __installBtn.style.display = "inline-flex";
+});
+__installBtn.addEventListener("click", async () => {
+  if(!__deferredPrompt) return;
+  __deferredPrompt.prompt(); await __deferredPrompt.userChoice; __deferredPrompt = null;
+  __installBtn.style.display = "none";
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "Éditeur de niveaux — Chute Libre",
+  "short_name": "Éditeur Chute Libre",
+  "description": "Éditeur de niveaux pour Chute Libre : poser, paramétrer, relier et tester des pièges, puis exporter en JSON.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f5fb",
+  "theme_color": "#3d5af1",
+  "orientation": "any",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
