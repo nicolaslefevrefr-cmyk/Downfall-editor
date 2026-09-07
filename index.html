@@ -76,6 +76,14 @@
 <script>
 if("serviceWorker" in navigator){
   window.addEventListener("load", () => { navigator.serviceWorker.register("service-worker.js").catch(()=>{}); });
+  /* Dès qu'une nouvelle version du service worker prend le relais (après
+     un déploiement), on recharge une fois automatiquement. */
+  let __swRefreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if(__swRefreshing) return;
+    __swRefreshing = true;
+    window.location.reload();
+  });
 }
 let __deferredPrompt = null;
 const __installBtn = document.getElementById("installBtn");
