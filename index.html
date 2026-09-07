@@ -15,10 +15,6 @@
   <header id="topbar">
     <div class="tgroup">
       <button id="btnTogglePalette" class="tbtn drawerToggle">📦</button>
-      <button id="btnNewLevel" class="tbtn">+ Niveau</button>
-      <select id="levelSelect"></select>
-      <button id="btnRenameLevel" class="tbtn" title="Renommer le niveau">✎</button>
-      <button id="btnDeleteLevel" class="tbtn danger" title="Supprimer le niveau">🗑</button>
     </div>
     <div class="tgroup">
       <button id="btnImport" class="tbtn">Importer JSON</button>
@@ -31,7 +27,7 @@
       <button id="btnDelete" class="tbtn danger" disabled>🗑 Supprimer</button>
       <button id="btnPlay" class="tbtn primary">▶ Tester le niveau</button>
       <button id="installBtn" class="tbtn" style="display:none;">⬇ Installer</button>
-      <button id="btnToggleInspector" class="tbtn drawerToggle">⚙️</button>
+      <button id="btnToggleInspector" class="tbtn" title="Propriétés">⚙️</button>
     </div>
   </header>
 
@@ -39,7 +35,7 @@
     <aside id="palette">
       <h3>Bibliothèque d'objets</h3>
       <div id="paletteList"></div>
-      <h3>Niveau courant</h3>
+      <h3>Niveau</h3>
       <div id="levelMeta"></div>
     </aside>
 
@@ -47,6 +43,7 @@
       <div id="canvasWrap">
         <canvas id="editorCanvas"></canvas>
         <div id="playOverlayMsg"></div>
+        <label id="showHiddenToggle" class="tcheck"><input id="chkShowHidden" type="checkbox"> Tout voir (éléments cachés)</label>
         <div id="zoomBar">
           <button id="btnZoomOut" class="tbtn">−</button>
           <span id="zoomLabel">100%</span>

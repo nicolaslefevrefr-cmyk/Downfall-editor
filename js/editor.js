@@ -12,32 +12,29 @@
 
 const W = 800, H = 450;
 const GRAVITY = 2200, MOVE_SPEED = 240, JUMP_VELOCITY = -620, MAX_FALL = 900, STEP_UP = 14;
-const GRID = 10;
+const GRID = 20;
 
-/* ---------------------------- Bibliothèque d'objets (palette) ---------------------------- */
+/* ---------------------------- Bibliothèque d'objets (palette) ----------------------------
+   Volontairement réduite à un petit socle générique et composable : tout le
+   reste (plateforme qui tombe, porte, porte verrouillée, plafond surgissant,
+   décor) se reconstruit à partir de "Sol / plateforme" + trigger/action/lien
+   — c'est plus flexible qu'un catalogue figé de blocs spécialisés, et c'est
+   la logique "kit" du jeu. Les anciens exports JSON contenant ces kinds
+   (falling, door, gate, blocker, decoy) restent affichés correctement si
+   réimportés : seul le rendu générique est conservé, seule la palette est
+   réduite. */
 const KIND_LIB = [
-  { kind:"static", label:"Sol / plateforme", color:"#a1382a", w:120, h:40, defaults:{ solid:true } },
-  { kind:"falling", label:"Plateforme piège (s'effondre)", color:"#c98a3a", w:90, h:22,
-    defaults:{ solid:true, description:"Cette plateforme s'effondre après l'atterrissage.",
-      trap:{ trigger:{type:"ON_LAND"}, action:{type:"FALL", shakeMs:400, fallSpeed:260} } } },
-  { kind:"hidden_spike", label:"Pic caché", color:"#e0455c", w:26, h:22,
-    defaults:{ solid:false, hazard:false, visible:false, description:"Un pic caché se révèle quand on approche.",
+  { kind:"static", label:"Sol / plateforme / mur", color:"#a1382a", w:120, h:40,
+    defaults:{ solid:true, trap:{ trigger:{type:"ON_ENTER"}, action:{type:"NONE"} } } },
+  { kind:"hidden_spike", label:"Pic caché", color:"#e0455c", w:20, h:20,
+    defaults:{ solid:false, hazard:true, visible:false, description:"Un pic caché se révèle quand on approche.",
       trap:{ trigger:{type:"ON_ENTER"}, action:{type:"REVEAL", delay:150} } } },
-  { kind:"door", label:"Porte (sortie ou leurre)", color:"#3d5af1", w:40, h:70,
-    defaults:{ solid:false, description:"Une porte.",
-      trap:{ trigger:{type:"ON_ENTER"}, action:{type:"DISAPPEAR"} } } },
-  { kind:"button", label:"Bouton", color:"#8a6a3a", w:60, h:16,
+  { kind:"button", label:"Bouton", color:"#8a6a3a", w:60, h:20,
     defaults:{ solid:false, description:"Un bouton qui déclenche quelque chose ailleurs.",
       trap:{ trigger:{type:"ON_ENTER"}, action:{type:"ACTIVATE"} } } },
-  { kind:"gate", label:"Porte verrouillée (mur)", color:"#575d6e", w:16, h:120,
-    defaults:{ solid:true, description:"Une porte verrouillée.", trap:{} } },
-  { kind:"blocker", label:"Plafond/mur surgissant", color:"#a1382a", w:100, h:60,
-    defaults:{ solid:false, visible:false, description:"Un mur invisible qui surgit brièvement.", trap:{} } },
-  { kind:"sensor", label:"Déclencheur (zone invisible)", color:"#3d5af1", w:50, h:38,
+  { kind:"sensor", label:"Déclencheur (zone invisible)", color:"#3d5af1", w:40, h:40,
     defaults:{ solid:false, visible:false,
-      trap:{ trigger:{type:"ON_JUMP"}, action:{type:"NONE"} } } },
-  { kind:"decoy", label:"Bloc décor (sûr, camouflage)", color:"#a1382a", w:70, h:18,
-    defaults:{ solid:true } },
+      trap:{ trigger:{type:"ON_ENTER"}, action:{type:"NONE"} } } },
 ];
 function kindMeta(kind){ return KIND_LIB.find(k=>k.kind===kind) || KIND_LIB[0]; }
 
@@ -65,21 +62,20 @@ const ACTION_TYPES = [
 /* ---------------------------- Modèle de document ---------------------------- */
 function makeEmptyLevel(id, name){
   return {
-    id, name, difficulty:1, playerStart:{x:40,y:372}, exit:{x:730,y:350,w:40,h:60},
+    id, name, difficulty:1, playerStart:{x:40,y:372}, exit:{x:720,y:360,w:40,h:60},
     /* Fermé en haut/gauche/droite par défaut : la seule façon de "sortir"
        est de tomber (mort) ou d'atteindre la sortie — jamais un bord d'écran.
        Ce sont des objets comme les autres : déplaçables/supprimables si
        le niveau en a besoin autrement. */
     objects:[
-      { id:"_boundTop", kind:"gate", x:0,y:0,w:800,h:14, solid:true },
-      { id:"_boundLeft", kind:"gate", x:0,y:0,w:14,h:450, solid:true },
-      { id:"_boundRight", kind:"gate", x:786,y:0,w:14,h:450, solid:true },
+      { id:"_boundTop", kind:"gate", x:0,y:0,w:800,h:20, solid:true },
+      { id:"_boundLeft", kind:"gate", x:0,y:0,w:20,h:450, solid:true },
+      { id:"_boundRight", kind:"gate", x:780,y:0,w:20,h:450, solid:true },
     ],
   };
 }
-let doc = { levels:[ makeEmptyLevel("l1","Niveau 1") ] };
-let currentLevelIndex = 0;
-function curLevel(){ return doc.levels[currentLevelIndex]; }
+let level = makeEmptyLevel("level1", "Niveau 1");
+function curLevel(){ return level; }
 
 let selectedId = null;
 let mode = "select"; // "select" | "place" | "link"
@@ -97,6 +93,10 @@ function uniqueId(base){
   while(exists(id)){ n++; id = base+n; }
   return id;
 }
+/* Les murs de bordure (_boundTop/_boundLeft/_boundRight) sont posés par
+   défaut sur chaque niveau et ne doivent jamais pouvoir être supprimés —
+   comme la sortie et le point de départ, ce sont des repères structurels. */
+function isLocked(id){ return typeof id === "string" && id.indexOf("_bound") === 0; }
 function snap(v){ return gridOn ? Math.round(v/GRID)*GRID : Math.round(v); }
 
 /* ---------------------------- Vue (zoom / pan) ---------------------------- */
@@ -368,6 +368,7 @@ canvas.addEventListener("pointerdown", (evt)=>{
     curLevel().objects.push(obj);
     selectedId = id; mode="select"; placeKind=null;
     refreshPaletteActive(); renderInspector(); render();
+    setInspectorOpen(true);
     return;
   }
 
@@ -429,8 +430,8 @@ canvas.addEventListener("pointermove", (evt)=>{
     renderInspector(); render();
   } else if(drag.type==="resize"){
     const o = curLevel().objects.find(x=>x.id===drag.id);
-    o.w = Math.max(10, snap(drag.startW + (pt.x-drag.startX)));
-    o.h = Math.max(10, snap(drag.startH + (pt.y-drag.startY)));
+    o.w = Math.max(GRID, snap(drag.startW + (pt.x-drag.startX)));
+    o.h = Math.max(GRID, snap(drag.startH + (pt.y-drag.startY)));
     renderInspector(); render();
   } else if(drag.type==="moveExit"){
     const e = curLevel().exit;
@@ -439,8 +440,8 @@ canvas.addEventListener("pointermove", (evt)=>{
     renderInspector(); render();
   } else if(drag.type==="resizeExit"){
     const e = curLevel().exit;
-    e.w = Math.max(10, snap(drag.startW + (pt.x-drag.startX)));
-    e.h = Math.max(10, snap(drag.startH + (pt.y-drag.startY)));
+    e.w = Math.max(GRID, snap(drag.startW + (pt.x-drag.startX)));
+    e.h = Math.max(GRID, snap(drag.startH + (pt.y-drag.startY)));
     renderInspector(); render();
   } else if(drag.type==="moveStart"){
     const p = curLevel().playerStart;
@@ -479,18 +480,31 @@ const inspectorBody = document.getElementById("inspectorBody");
 const levelMetaEl = document.getElementById("levelMeta");
 const btnDuplicate = document.getElementById("btnDuplicate");
 const btnDelete = document.getElementById("btnDelete");
-document.getElementById("btnCloseInspector").addEventListener("click", ()=>{
-  selectedId = null; renderInspector(); render();
+
+/* Le panneau de propriétés est indépendant de la sélection : cliquer un
+   objet sur la scène le sélectionne (contour bleu, boutons dupliquer/
+   supprimer actifs) et rafraîchit le CONTENU du panneau, mais ne l'ouvre
+   pas. Seule l'icône ⚙️ (ou reposer un nouvel objet) l'ouvre ; le bouton ✕
+   et un clic en dehors le referment — sans perdre la sélection. */
+let inspectorOpen = false;
+function setInspectorOpen(v){
+  inspectorOpen = v;
+  document.getElementById("inspector").classList.toggle("open", inspectorOpen);
+}
+document.getElementById("btnCloseInspector").addEventListener("click", ()=>{ setInspectorOpen(false); });
+document.getElementById("btnToggleInspector").addEventListener("click", ()=>{
+  document.getElementById("palette").classList.remove("open");
+  setInspectorOpen(!inspectorOpen);
 });
 /* Clic en dehors du panneau (et en dehors du canvas, qui gère déjà sa propre
-   sélection) : referme le panneau si quelque chose était sélectionné. */
+   sélection) : referme le panneau s'il était ouvert. */
 document.addEventListener("pointerdown", (evt)=>{
   if(playRunning) return;
+  if(!inspectorOpen) return;
   const insp = document.getElementById("inspector");
-  if(!insp.classList.contains("open")) return;
   if(insp.contains(evt.target)) return;
   if(canvas.contains(evt.target)) return;
-  selectedId = null; renderInspector(); render();
+  setInspectorOpen(false);
 });
 
 function el(tag, attrs, ...children){
@@ -508,9 +522,9 @@ function renderLevelMeta(){
   const lvl = curLevel();
   levelMetaEl.innerHTML = "";
   const idField = el("div",{class:"field"}, el("label",{text:"Identifiant du niveau"}),
-    el("input",{type:"text", value:lvl.id, oninput:(e)=>{ lvl.id=e.target.value; refreshLevelSelect(); }}));
+    el("input",{type:"text", value:lvl.id, oninput:(e)=>{ lvl.id=e.target.value; }}));
   const nameField = el("div",{class:"field"}, el("label",{text:"Nom"}),
-    el("input",{type:"text", value:lvl.name, oninput:(e)=>{ lvl.name=e.target.value; refreshLevelSelect(); }}));
+    el("input",{type:"text", value:lvl.name, oninput:(e)=>{ lvl.name=e.target.value; }}));
   const diffField = el("div",{class:"field"}, el("label",{text:"Difficulté (1-5)"}),
     el("input",{type:"number", min:"1", max:"5", value:lvl.difficulty, oninput:(e)=>{ lvl.difficulty=Math.max(1,Math.min(5,parseInt(e.target.value)||1)); }}));
   levelMetaEl.appendChild(idField); levelMetaEl.appendChild(nameField); levelMetaEl.appendChild(diffField);
@@ -559,8 +573,11 @@ function renderActionParams(container, action, onchange){
   } else if(action.type==="APPEAR_TEMP"){
     container.appendChild(numField("Durée avant rétractation (ms)", action.ms!=null?action.ms:500, v=>{ action.ms=v; onchange(); }));
   } else if(action.type==="MOVE"){
-    container.appendChild(selectField("Direction", [{type:"left",label:"Gauche"},{type:"right",label:"Droite"}], action.direction||"right", v=>{ action.direction=v; onchange(); }));
-    container.appendChild(numField("Vitesse (px/s)", action.speed!=null?action.speed:100, v=>{ action.speed=v; onchange(); }));
+    container.appendChild(selectField("Direction", [
+      {type:"left",label:"Gauche"},{type:"right",label:"Droite"},{type:"up",label:"Haut"},{type:"down",label:"Bas"}
+    ], action.direction||"right", v=>{ action.direction=v; onchange(); }));
+    container.appendChild(numField("Vitesse maximale (px/s)", action.speed!=null?action.speed:100, v=>{ action.speed=v; onchange(); }));
+    container.appendChild(numField("Accélération (px/s², 0 = instantané)", action.acceleration!=null?action.acceleration:0, v=>{ action.acceleration=v; onchange(); }));
     container.appendChild(numField("Durée du mouvement (ms, 0 = indéfini)", action.duration!=null?action.duration:1000, v=>{ action.duration=v; onchange(); }));
   } else if(action.type==="ROTATE"){
     container.appendChild(selectField("Sens", [{type:"cw",label:"Horaire"},{type:"ccw",label:"Antihoraire"}], action.direction||"cw", v=>{ action.direction=v; onchange(); }));
@@ -570,7 +587,6 @@ function renderActionParams(container, action, onchange){
 }
 
 function renderInspector(){
-  document.getElementById("inspector").classList.toggle("open", !!selectedId);
   inspectorBody.innerHTML = "";
   const lvl = curLevel();
 
@@ -605,7 +621,10 @@ function renderInspector(){
     inspectorBody.innerHTML = '<p class="empty">Rien n\'est sélectionné. Clique un objet sur la scène, ou choisis un élément dans la bibliothèque pour en poser un nouveau.</p>';
     return;
   }
-  btnDuplicate.disabled = false; btnDelete.disabled = false;
+  btnDuplicate.disabled = false; btnDelete.disabled = isLocked(o.id);
+  if(isLocked(o.id)){
+    inspectorBody.appendChild(el("p",{class:"empty", text:"Mur de bordure par défaut — ne peut pas être supprimé."}));
+  }
 
   inspectorBody.appendChild(el("div",{class:"field"},
     el("label",{text:"Identifiant"}),
@@ -639,6 +658,7 @@ function renderInspector(){
   inspectorBody.appendChild(checkField("Solide (bloque le joueur)", o.solid, v=>{ o.solid=v; }));
   inspectorBody.appendChild(checkField("Dangereux au contact (hazard)", o.hazard, v=>{ o.hazard=v; }));
   inspectorBody.appendChild(checkField("Visible au démarrage", o.visible!==false, v=>{ o.visible=v; render(); }));
+  inspectorBody.appendChild(checkField("Bloquant même invisible (sinon : invisible = non solide, tant qu'il n'est pas révélé)", o.solidWhenHidden, v=>{ o.solidWhenHidden=v; }));
 
   inspectorBody.appendChild(textareaField("Description (affichée si le joueur meurt à cause de cet objet)", o.description, v=>{ o.description=v; }));
 
@@ -656,6 +676,11 @@ function renderInspector(){
       trigBox.appendChild(numField("Délai depuis le début du niveau (ms)", o.trap.trigger.delay||0, v=>{ o.trap.trigger.delay=v; }));
     } else if(o.trap.trigger.type==="ON_ATTEMPT"){
       trigBox.appendChild(numField("Nombre de tentatives minimum", o.trap.trigger.count||1, v=>{ o.trap.trigger.count=v; }));
+    } else if(o.trap.trigger.type==="ON_ENTER"){
+      trigBox.appendChild(selectField("Sens d'entrée requis", [
+        {type:"any",label:"Peu importe"},{type:"left",label:"Par la gauche"},{type:"right",label:"Par la droite"},
+        {type:"top",label:"Par le haut"},{type:"bottom",label:"Par le bas"},
+      ], o.trap.trigger.fromSide||"any", v=>{ o.trap.trigger.fromSide = v==="any" ? undefined : v; }));
     }
   }
   inspectorBody.appendChild(trigBox);
@@ -688,7 +713,7 @@ function renderInspector(){
       el("button",{class:"miniBtn", text:"✕", onclick:()=>{ o.trap.then.splice(idx,1); renderInspector(); render(); }})
     );
     row.appendChild(top);
-    row.appendChild(selectField("Cible", others.map(id=>({type:id,label:id})), link.target, v=>{ link.target=v; render(); }));
+    row.appendChild(selectField("Cible", others.map(id=>({type:id,label:id})), link.target, v=>{ link.target=v; renderInspector(); render(); }));
     row.appendChild(numField("Délai (ms)", link.delay||0, v=>{ link.delay=v; }));
     if(!link.action) link.action = {type:"NONE"};
     row.appendChild(selectField("Action sur la cible", ACTION_TYPES, link.action.type, v=>{ link.action={type:v}; renderInspector(); }));
@@ -712,41 +737,6 @@ function renderInspector(){
   inspectorBody.appendChild(casBox);
 }
 
-/* ---------------------------- Toolbar : niveaux ---------------------------- */
-const levelSelectEl = document.getElementById("levelSelect");
-function refreshLevelSelect(){
-  levelSelectEl.innerHTML = "";
-  doc.levels.forEach((lvl, i)=>{
-    const o = el("option",{value:i, text:(i+1)+". "+lvl.name+" ("+lvl.id+")"});
-    if(i===currentLevelIndex) o.selected = true;
-    levelSelectEl.appendChild(o);
-  });
-}
-levelSelectEl.addEventListener("change", ()=>{
-  currentLevelIndex = parseInt(levelSelectEl.value);
-  selectedId = null; mode="select"; placeKind=null; linkSourceId=null;
-  renderLevelMeta(); renderInspector(); refreshPaletteActive(); render();
-});
-document.getElementById("btnNewLevel").addEventListener("click", ()=>{
-  const n = doc.levels.length+1;
-  doc.levels.push(makeEmptyLevel("l"+n, "Niveau "+n));
-  currentLevelIndex = doc.levels.length-1;
-  selectedId = null;
-  refreshLevelSelect(); renderLevelMeta(); renderInspector(); render();
-});
-document.getElementById("btnRenameLevel").addEventListener("click", ()=>{
-  const name = prompt("Nom du niveau :", curLevel().name);
-  if(name){ curLevel().name = name; refreshLevelSelect(); renderLevelMeta(); }
-});
-document.getElementById("btnDeleteLevel").addEventListener("click", ()=>{
-  if(doc.levels.length<=1){ alert("Il doit rester au moins un niveau."); return; }
-  if(!confirm("Supprimer le niveau \""+curLevel().name+"\" ?")) return;
-  doc.levels.splice(currentLevelIndex,1);
-  currentLevelIndex = Math.max(0, currentLevelIndex-1);
-  selectedId = null;
-  refreshLevelSelect(); renderLevelMeta(); renderInspector(); render();
-});
-
 /* ---------------------------- Toolbar : dupliquer / supprimer ---------------------------- */
 btnDuplicate.addEventListener("click", ()=>{
   const o = selectedObj();
@@ -760,7 +750,7 @@ btnDuplicate.addEventListener("click", ()=>{
 });
 btnDelete.addEventListener("click", ()=>{
   const o = selectedObj();
-  if(!o) return;
+  if(!o || isLocked(o.id)) return;
   curLevel().objects = curLevel().objects.filter(x=>x.id!==o.id);
   for(const other of curLevel().objects){
     if(other.trap && other.trap.then) other.trap.then = other.trap.then.filter(l=>l.target!==o.id);
@@ -770,7 +760,7 @@ btnDelete.addEventListener("click", ()=>{
 });
 window.addEventListener("keydown", (e)=>{
   if(playRunning) return;
-  if((e.key==="Delete" || e.key==="Backspace") && selectedObj() && document.activeElement.tagName!=="INPUT" && document.activeElement.tagName!=="TEXTAREA"){
+  if((e.key==="Delete" || e.key==="Backspace") && selectedObj() && !isLocked(selectedObj().id) && document.activeElement.tagName!=="INPUT" && document.activeElement.tagName!=="TEXTAREA"){
     e.preventDefault(); btnDelete.click();
   }
   if(e.key==="Escape"){ mode="select"; placeKind=null; linkSourceId=null; refreshPaletteActive(); render(); }
@@ -779,12 +769,13 @@ window.addEventListener("keydown", (e)=>{
 /* ---------------------------- Grille ---------------------------- */
 document.getElementById("chkGrid").addEventListener("change", (e)=>{ gridOn = e.target.checked; render(); });
 
-/* ---------------------------- Import / Export JSON ---------------------------- */
+/* ---------------------------- Import / Export JSON (un seul niveau) ---------------------------- */
 document.getElementById("btnExport").addEventListener("click", ()=>{
-  const blob = new Blob([JSON.stringify(doc, null, 2)], {type:"application/json"});
+  const blob = new Blob([JSON.stringify(level, null, 2)], {type:"application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = "niveaux-chute-libre.json";
+  const safeName = (level.id || "niveau").replace(/[^a-z0-9_-]+/gi, "-");
+  a.href = url; a.download = safeName + ".json";
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 });
@@ -796,11 +787,17 @@ document.getElementById("fileImport").addEventListener("change", (e)=>{
   reader.onload = () => {
     try{
       const parsed = JSON.parse(reader.result);
-      if(Array.isArray(parsed)) doc = { levels: parsed };
-      else if(parsed.levels) doc = parsed;
-      else throw new Error("format inattendu");
-      currentLevelIndex = 0; selectedId = null;
-      refreshLevelSelect(); renderLevelMeta(); renderInspector(); render();
+      /* Accepte un niveau seul (format courant), ou par confort un ancien
+         export multi-niveaux ({levels:[...]} ou tableau) dont on ne reprend
+         que le premier niveau. */
+      let imported;
+      if(Array.isArray(parsed)) imported = parsed[0];
+      else if(parsed.levels) imported = parsed.levels[0];
+      else imported = parsed;
+      if(!imported || !imported.objects) throw new Error("format de niveau inattendu");
+      level = Object.assign(makeEmptyLevel(imported.id||"level1", imported.name||"Niveau"), imported);
+      selectedId = null; mode="select"; placeKind=null; linkSourceId=null;
+      renderLevelMeta(); renderInspector(); refreshPaletteActive(); fitView(); render();
     }catch(err){ alert("Fichier JSON invalide : "+err.message); }
   };
   reader.readAsText(file);
@@ -825,6 +822,11 @@ function playProcessTimers(){
   for(const t of due) t.fn();
 }
 function playOverlap(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
+function approach(cur, target, maxDelta){
+  if(cur < target) return Math.min(cur+maxDelta, target);
+  if(cur > target) return Math.max(cur-maxDelta, target);
+  return cur;
+}
 function playApplyAction(obj, action){
   switch(action.type){
     case "FALL":
@@ -832,15 +834,37 @@ function playApplyAction(obj, action){
       playScheduleTimer(action.shakeMs||300, ()=>{ obj.state="falling"; obj.solid=false; obj.vy=0; playFireCascade(obj); });
       break;
     case "DISAPPEAR": obj.visible=false; obj.solid=false; obj.hazard=false; playFireCascade(obj); break;
-    case "REVEAL": playScheduleTimer(action.delay||0, ()=>{ obj.visible=true; obj.hazard=true; obj.state="revealed"; playFireCascade(obj); }); break;
+    case "REVEAL":
+      /* Rend l'objet visible et restaure sa solidité d'origine — sans
+         jamais forcer "hazard" à true : le danger dépend uniquement de ce
+         qui est coché dans "Dangereux au contact" pour CET objet. Un pic
+         caché est configuré hazard=true dès le départ (mais reste inoffensif
+         tant qu'il est invisible, la vérification de dégât exige les deux) ;
+         un mur normal reste hazard=false et redevient donc un mur normal. */
+      playScheduleTimer(action.delay||0, ()=>{
+        const src = playObjectsById[obj.id];
+        obj.visible=true;
+        obj.solid = src ? !!src.solid : obj.solid;
+        obj.state="revealed";
+        playFireCascade(obj);
+      });
+      break;
     case "OPEN": obj.solid=false; obj.visible=false; playFireCascade(obj); break;
     case "ACTIVATE": obj.state="activated"; playFireCascade(obj); break;
     case "APPEAR_TEMP": obj.visible=true; obj.solid=true; playScheduleTimer(action.ms||500, ()=>{ obj.visible=false; obj.solid=false; }); playFireCascade(obj); break;
     case "DISABLE": return;
     case "MOVE":
       obj.state="moving";
-      obj.moveVx = (action.direction==="left"?-1:1) * (action.speed!=null?action.speed:100);
-      if(action.duration){ playScheduleTimer(action.duration, ()=>{ obj.state="idle"; obj.moveVx=0; }); }
+      {
+        const speed = action.speed!=null?action.speed:100;
+        const dir = action.direction||"right";
+        obj.moveTargetVx = dir==="left" ? -speed : dir==="right" ? speed : 0;
+        obj.moveTargetVy = dir==="up" ? -speed : dir==="down" ? speed : 0;
+        obj.moveAccel = action.acceleration || 0; // 0 = atteint la vitesse cible instantanément
+        if(!obj.moveAccel){ obj.moveVx = obj.moveTargetVx; obj.moveVy = obj.moveTargetVy; }
+        else { obj.moveVx = obj.moveVx || 0; obj.moveVy = obj.moveVy || 0; }
+      }
+      if(action.duration){ playScheduleTimer(action.duration, ()=>{ obj.state="idle"; obj.moveVx=0; obj.moveVy=0; }); }
       playFireCascade(obj);
       break;
     case "ROTATE":
@@ -853,14 +877,30 @@ function playApplyAction(obj, action){
   }
 }
 function playFireCascade(obj){
+  /* Chaque lien de cascade s'applique indépendamment, même si la cible a
+     déjà reçu une action d'un autre lien (ex : un premier lien qui la fait
+     apparaître, un second qui la fait bouger). `triggered` sert seulement à
+     empêcher le déclencheur PROPRE de la cible de se redéclencher tout
+     seul — il ne doit jamais empêcher une cascade explicite de s'appliquer. */
   const def = playObjectsById[obj.id];
   if(!def || !def.trap || !def.trap.then) return;
   for(const link of def.trap.then){
     playScheduleTimer(link.delay||0, ()=>{
       const target = playObjects.find(o=>o.id===link.target);
-      if(target && !target.triggered){ target.triggered=true; playApplyAction(target, link.action); }
+      if(target){ target.triggered=true; playApplyAction(target, link.action); }
     });
   }
+}
+/* Détermine de quel(s) côté(s) une boîte (prevBox) qui ne chevauchait pas
+   `obj` est entrée en chevauchement dans `obj`, en comparant à sa position
+   après déplacement (newBox). Sert au trigger ON_ENTER avec sens requis. */
+function enteredFromSides(prevBox, newBox, obj){
+  const sides = [];
+  if(prevBox.x+prevBox.w <= obj.x && newBox.x+newBox.w > obj.x) sides.push("left");
+  if(prevBox.x >= obj.x+obj.w && newBox.x < obj.x+obj.w) sides.push("right");
+  if(prevBox.y+prevBox.h <= obj.y && newBox.y+newBox.h > obj.y) sides.push("top");
+  if(prevBox.y >= obj.y+obj.h && newBox.y < obj.y+obj.h) sides.push("bottom");
+  return sides;
 }
 function playCheckTrigger(obj){
   const def = playObjectsById[obj.id];
@@ -868,7 +908,13 @@ function playCheckTrigger(obj){
   if(!t) return false;
   switch(t.type){
     case "ON_LAND": return P.justLandedOn===obj.id;
-    case "ON_ENTER": return playOverlap(P, obj);
+    case "ON_ENTER": {
+      if(!playOverlap(P, obj)) return false;
+      if(!t.fromSide) return true;
+      if(playPrevBox && playOverlap(playPrevBox, obj)) return false; // déjà dedans, pas une "entrée"
+      const sides = playPrevBox ? enteredFromSides(playPrevBox, P, obj) : [];
+      return sides.includes(t.fromSide);
+    }
     case "ON_JUMP": return P.justJumped && playOverlap(P, obj);
     case "ON_TIMER": return playNow >= (t.delay||0);
     case "ON_ATTEMPT": return playAttempts >= (t.count||1);
@@ -877,40 +923,73 @@ function playCheckTrigger(obj){
 }
 let playAttempts = 0;
 let walkPhase = 0;
+let showHiddenInPlay = false;
 function playBuildLevel(){
   const lvl = curLevel();
   playObjects = JSON.parse(JSON.stringify(lvl.objects)).map(o=>Object.assign({visible:true,hazard:!!o.hazard,triggered:false,state:"idle"}, o));
   playObjectsById = {};
   for(const o of lvl.objects) playObjectsById[o.id]=o;
   P = { x:lvl.playerStart.x, y:lvl.playerStart.y, w:26, h:38, vx:0, vy:0, grounded:false, groundedOn:null,
-    prevGroundedOn:null, justLandedOn:null, justJumped:false, lastBump:null, facing:1 };
-  playTimers=[]; playNow=0; playMode="playing"; playLastCause=null; walkPhase=0;
+    prevGroundedOn:null, justLandedOn:null, justJumped:false, lastBump:null, lastGroundY:null, facing:1 };
+  playTimers=[]; playNow=0; playMode="playing"; playLastCause=null; walkPhase=0; playPrevBox=null;
   hidePlayMsg();
+}
+/* Boîte de collision effective d'un objet : pour un objet qui tourne, on
+   utilise le rectangle aligné sur les axes qui englobe exactement sa forme
+   pivotée (il grandit/rétrécit avec l'angle). C'est une approximation
+   simple (pas une vraie collision de rectangle orienté), mais elle garde
+   la physique cohérente avec le rendu visuel : le joueur peut monter sur
+   une plateforme en rotation et sa hauteur d'appui suit l'inclinaison. */
+function effectiveBox(o){
+  if(o.angle){
+    const rad = o.angle*Math.PI/180;
+    const hw = o.w/2, hh = o.h/2;
+    const bhw = Math.abs(hw*Math.cos(rad)) + Math.abs(hh*Math.sin(rad));
+    const bhh = Math.abs(hw*Math.sin(rad)) + Math.abs(hh*Math.cos(rad));
+    const cx = o.x+hw, cy = o.y+hh;
+    return { x:cx-bhw, y:cy-bhh, w:bhw*2, h:bhh*2 };
+  }
+  return o;
 }
 function playResolve(dt){
   const prevBottom=P.y+P.h, prevTop=P.y;
   P.x += P.vx*dt; P.y += P.vy*dt;
   P.grounded=false; P.groundedOn=null;
   for(const o of playObjects){
+    /* Un objet invisible ne bloque pas physiquement par défaut (sinon un
+       piège qu'on a réussi à éviter continuerait à gêner le joueur) — sauf
+       si "Bloquant même invisible" est explicitement coché. */
     if(!o.solid) continue;
-    if(!playOverlap(P,o)) continue;
-    if(P.vy>=0 && prevBottom<=o.y+6){ P.y=o.y-P.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; continue; }
-    if(P.vy<0 && prevTop>=o.y+o.h-6){ P.y=o.y+o.h; P.vy=0; if(o.kind==="blocker") P.lastBump={id:o.id,t:playNow}; continue; }
-    const overlapX = Math.min(P.x+P.w,o.x+o.w)-Math.max(P.x,o.x);
-    const overlapY = Math.min(P.y+P.h,o.y+o.h)-Math.max(P.y,o.y);
+    if(o.visible===false && !o.solidWhenHidden) continue;
+    const box = effectiveBox(o);
+    if(!playOverlap(P,box)) continue;
+    if(P.vy>=0 && prevBottom<=box.y+2){ P.y=box.y-P.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y; continue; }
+    if(P.vy<0 && prevTop>=box.y+box.h-2){ P.y=box.y+box.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; continue; }
+    const overlapX = Math.min(P.x+P.w,box.x+box.w)-Math.max(P.x,box.x);
+    const overlapY = Math.min(P.y+P.h,box.y+box.h)-Math.max(P.y,box.y);
     if(overlapX<overlapY){
-      const shortfall = prevBottom - o.y;
-      if(shortfall>0 && shortfall<=STEP_UP && P.vy>=0){ P.y=o.y-P.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; }
-      else { if(P.x<o.x) P.x-=overlapX; else P.x+=overlapX; P.vx=0; }
+      /* Aide au pas : seulement pour grimper sur une plateforme nettement
+         plus HAUTE que celle qu'on vient de quitter (un saut à peine trop
+         court). Si la cible est à la même hauteur (ou plus basse), on ne
+         rattrape pas — sinon ça bouche aussi les petits trous qu'on
+         traverse simplement en marchant, ce qui n'est pas voulu. */
+      const shortfall = prevBottom - box.y;
+      const targetIsRaised = P.lastGroundY==null || box.y < P.lastGroundY - 2;
+      if(targetIsRaised && shortfall>0 && shortfall<=STEP_UP && P.vy>=0){
+        P.y=box.y-P.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y;
+      }
+      else { if(P.x<box.x) P.x-=overlapX; else P.x+=overlapX; P.vx=0; }
     } else {
-      if(P.y<o.y){ P.y-=overlapY; P.vy=0; P.grounded=true; P.groundedOn=o.id; }
-      else { P.y+=overlapY; P.vy=0; if(o.kind==="blocker") P.lastBump={id:o.id,t:playNow}; }
+      if(P.y<box.y){ P.y-=overlapY; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y; }
+      else { P.y+=overlapY; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
     }
   }
   if(P.x<0) P.x=0; if(P.x+P.w>W) P.x=W-P.w;
 }
+let playPrevBox = null;
 function playUpdate(dt){
   playNow += dt*1000; playProcessTimers();
+  playPrevBox = { x:P.x, y:P.y, w:P.w, h:P.h };
 
   /* Objets animés, avant la résolution des collisions (le joueur se tient
      sur la position à jour d'une plateforme mobile ce tour-ci). */
@@ -919,6 +998,11 @@ function playUpdate(dt){
     if(o.state==="falling"){
       o.y += o.fallSpeed*dt; if(o.y>H+100){ o.visible=false; o.dead=true; }
     } else if(o.state==="moving"){
+      if(o.moveAccel){
+        const maxStep = o.moveAccel*dt;
+        o.moveVx = approach(o.moveVx||0, o.moveTargetVx||0, maxStep);
+        o.moveVy = approach(o.moveVy||0, o.moveTargetVy||0, maxStep);
+      }
       const dx=(o.moveVx||0)*dt, dy=(o.moveVy||0)*dt;
       o.x += dx; o.y += dy; o._lastDX=dx; o._lastDY=dy;
     } else if(o.state==="rotating"){
@@ -928,12 +1012,24 @@ function playUpdate(dt){
 
   P.vx = ((playInput.right?1:0)-(playInput.left?1:0)) * MOVE_SPEED;
   if(P.vx>0) P.facing=1; else if(P.vx<0) P.facing=-1;
-  walkPhase += Math.abs(P.vx)*dt*0.03;
+  walkPhase += Math.abs(P.vx)*dt*0.15;
   P.justJumped=false;
   if(playInput.jumpQueued && P.grounded){ P.vy=JUMP_VELOCITY; P.grounded=false; P.groundedOn=null; P.justJumped=true; }
   playInput.jumpQueued=false;
-  P.vy += GRAVITY*dt; if(P.vy>MAX_FALL) P.vy=MAX_FALL;
-  playResolve(dt);
+
+  /* Sous-pas physiques : à 240px/s et 60 img/s, une image déplace le joueur
+     de 4px, et son corps fait 26px de large — l'écart réel à traverser sans
+     aucun contact (largeur du trou moins largeur du joueur) est souvent
+     plus petit qu'un seul pas, donc franchi d'un coup avant que la gravité
+     n'ait eu le temps de s'accumuler. Recalculer la gravité et la collision
+     plusieurs fois par image (au lieu d'une fois avec le dt complet) donne
+     une chute d'apparence continue et détecte correctement les petits trous. */
+  const SUBSTEPS = 4;
+  const subDt = dt / SUBSTEPS;
+  for(let s=0; s<SUBSTEPS; s++){
+    P.vy += GRAVITY*subDt; if(P.vy>MAX_FALL) P.vy=MAX_FALL;
+    playResolve(subDt);
+  }
 
   /* Portage par une plateforme mobile. */
   if(P.grounded && P.groundedOn){
@@ -950,7 +1046,12 @@ function playUpdate(dt){
     if(playCheckTrigger(o)){ o.triggered=true; playApplyAction(o, playObjectsById[o.id].trap.action); }
   }
   const lvl = curLevel();
-  if(playOverlap(P, lvl.exit)){ playMode="won"; showPlayMsg("⭐ Niveau terminé ! Appuie sur ▶ pour rejouer, ou retourne à l'édition."); return; }
+  if(playOverlap(P, lvl.exit)){
+    playMode="won";
+    showPlayMsg("⭐ Niveau terminé ! Relance automatique dans 2 secondes…");
+    setTimeout(()=>{ if(playRunning) playBuildLevel(); }, 2000);
+    return;
+  }
   if(P.y>H+60){ playDeath(null); return; }
   for(const o of playObjects){ if(o.hazard && o.visible!==false && playOverlap(P,o)){ playDeath(o); return; } }
 }
@@ -963,13 +1064,15 @@ function playDeath(obj){
   setTimeout(()=>{ if(playRunning){ playBuildLevel(); } }, 1100);
 }
 function drawPlayObject(o){
-  if(o.visible===false) return;
+  const invisible = (o.visible===false);
+  if(invisible && !showHiddenInPlay) return;
   const shakeOff = (o.state==="shaking") ? Math.sin(playNow*0.06)*2 : 0;
   ctx.save(); ctx.translate(shakeOff,0);
   if(o.angle){
     const cx=o.x+o.w/2, cy=o.y+o.h/2;
     ctx.translate(cx,cy); ctx.rotate(o.angle*Math.PI/180); ctx.translate(-cx,-cy);
   }
+  if(invisible) ctx.globalAlpha = 0.4;
   switch(o.kind){
     case "static": case "decoy": drawBrick(o.x,o.y,o.w,o.h); break;
     case "falling":
@@ -982,6 +1085,8 @@ function drawPlayObject(o){
     case "hidden_spike":
       if(o.hazard){ ctx.fillStyle="#e0455c"; for(let i=0;i<3;i++){ const sx=o.x+i*(o.w/3);
         ctx.beginPath(); ctx.moveTo(sx,o.y+o.h); ctx.lineTo(sx+o.w/6,o.y); ctx.lineTo(sx+o.w/3,o.y+o.h); ctx.closePath(); ctx.fill(); } }
+      else if(invisible){ ctx.fillStyle="rgba(224,69,92,.35)"; for(let i=0;i<3;i++){ const sx=o.x+i*(o.w/3);
+        ctx.beginPath(); ctx.moveTo(sx,o.y+o.h); ctx.lineTo(sx+o.w/6,o.y); ctx.lineTo(sx+o.w/3,o.y+o.h); ctx.closePath(); ctx.fill(); } }
       break;
     case "door":
       ctx.fillStyle="#3d5af1"; ctx.fillRect(o.x,o.y,o.w,o.h);
@@ -993,6 +1098,15 @@ function drawPlayObject(o){
       { const cx=o.x+o.w/2, cy=o.y+o.h/2, r=Math.min(o.w,o.h)*0.28;
         ctx.fillStyle = o.state==="activated" ? "#4f8f6a" : "#8a6a3a"; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill(); }
       break;
+    case "sensor":
+      ctx.fillStyle="rgba(61,90,241,.18)"; ctx.fillRect(o.x,o.y,o.w,o.h);
+      ctx.strokeStyle="#3d5af1"; ctx.setLineDash([4,3]); ctx.lineWidth=1.5; ctx.strokeRect(o.x,o.y,o.w,o.h); ctx.setLineDash([]);
+      break;
+  }
+  if(invisible){
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle="rgba(61,90,241,.7)"; ctx.setLineDash([4,3]); ctx.lineWidth=1.5;
+    ctx.strokeRect(o.x+0.5,o.y+0.5,o.w-1,o.h-1); ctx.setLineDash([]);
   }
   ctx.restore();
 }
@@ -1000,7 +1114,7 @@ function drawPlayObject(o){
    jambes) qui s'anime à la marche et prend une pose différente en l'air —
    dessiné en coordonnées LOCALES (origine = centre de la boîte du joueur,
    déjà translatée/retournée par l'appelant selon P.facing). */
-function drawStickFigure(w, h, grounded, phase, dead){
+function drawStickFigure(w, h, grounded, phase, dead, speedFrac){
   const x = -w/2, y = -h/2;
   const headR = 5;
   const midX = x + w/2;
@@ -1008,7 +1122,8 @@ function drawStickFigure(w, h, grounded, phase, dead){
   const shoulderY = y + headR*2 + 4;
   const hipY = y + h*0.58;
   const footY = y + h;
-  const swing = grounded ? Math.sin(phase) : 0;
+  const amp = grounded ? (speedFrac!=null?speedFrac:1) : 1;
+  const swing = grounded ? Math.sin(phase)*amp : 0;
   const legOffset = grounded ? swing*8 : 0;
   const armOffset = grounded ? -swing*7 : 0;
 
@@ -1035,13 +1150,29 @@ function drawStickFigure(w, h, grounded, phase, dead){
     ctx.beginPath(); ctx.moveTo(midX, hipY); ctx.lineTo(midX+9, hipY+8); ctx.lineTo(midX+5, footY); ctx.stroke();
   }
 }
+/* Ne renvoie que la zone jouable (entre les murs de bordure) : tout ce qui
+   est hors de cette zone (les murs eux-mêmes, et au-delà) reste en noir —
+   comme si les bornes étaient le cadre même de l'écran. Si un niveau n'a
+   pas (ou plus) ses murs par défaut, on retombe sur le monde 800x450 entier. */
+function computePlayArea(){
+  const top = playObjects.find(o=>o.id==="_boundTop");
+  const left = playObjects.find(o=>o.id==="_boundLeft");
+  const right = playObjects.find(o=>o.id==="_boundRight");
+  const x0 = left ? left.x+left.w : 0;
+  const y0 = top ? top.y+top.h : 0;
+  const x1 = right ? right.x : W;
+  return { x:x0, y:y0, w:Math.max(1,x1-x0), h:Math.max(1,H-y0) };
+}
 function renderPlay(){
   ctx.save();
   ctx.setTransform(1,0,0,1,0,0);
-  ctx.fillStyle = "#14161f"; ctx.fillRect(0,0,canvas.width,canvas.height);
-  const s = Math.min(canvas.width/W, canvas.height/H) || 1;
-  const ox = (canvas.width - W*s)/2, oy = (canvas.height - H*s)/2;
+  ctx.fillStyle = "#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  const area = computePlayArea();
+  const s = Math.min(canvas.width/area.w, canvas.height/area.h) || 1;
+  const ox = (canvas.width - area.w*s)/2 - area.x*s;
+  const oy = (canvas.height - area.h*s)/2 - area.y*s;
   ctx.setTransform(s,0,0,s, ox, oy);
+  ctx.beginPath(); ctx.rect(area.x, area.y, area.w, area.h); ctx.clip();
 
   const grad = ctx.createLinearGradient(0,0,0,H); grad.addColorStop(0,"#eef1fb"); grad.addColorStop(1,"#e2e6f6");
   ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
@@ -1050,7 +1181,7 @@ function renderPlay(){
   ctx.fillStyle="#eafff3"; ctx.font="18px sans-serif"; ctx.textAlign="center"; ctx.fillText("🚪", ex.x+ex.w/2, ex.y+ex.h/2+7);
   for(const o of playObjects) drawPlayObject(o);
   ctx.save(); ctx.translate(P.x+P.w/2, P.y+P.h/2); ctx.scale(P.facing,1);
-  drawStickFigure(P.w, P.h, P.grounded, walkPhase, playMode==="dead");
+  drawStickFigure(P.w, P.h, P.grounded, walkPhase, playMode==="dead", Math.min(1, Math.abs(P.vx)/80));
   ctx.restore();
   ctx.restore();
 }
@@ -1070,9 +1201,16 @@ function hidePlayMsg(){ playOverlayMsg.classList.remove("show"); }
 const btnPlay = document.getElementById("btnPlay");
 const playControlsEl = document.getElementById("playControls");
 function startPlay(){
+  /* Important : si le focus clavier est resté sur un champ du panneau de
+     propriétés (après avoir édité un paramètre), les flèches gauche/droite
+     iraient déplacer le curseur texte / la sélection de ce champ au lieu de
+     contrôler le joueur — ce qui donne l'impression que le jeu se bloque.
+     On retire explicitement le focus en entrant en mode test. */
+  if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   playRunning = true; playAttempts=0; playLastTs=null;
   playBuildLevel();
   playControlsEl.classList.add("show");
+  document.getElementById("showHiddenToggle").classList.add("show");
   btnPlay.textContent = "■ Retour à l'édition";
   document.getElementById("palette").style.display="none";
   document.getElementById("inspector").style.display="none";
@@ -1082,6 +1220,7 @@ function startPlay(){
 function stopPlay(){
   playRunning = false;
   playControlsEl.classList.remove("show");
+  document.getElementById("showHiddenToggle").classList.remove("show");
   hidePlayMsg();
   btnPlay.textContent = "▶ Tester le niveau";
   document.getElementById("palette").style.display="";
@@ -1090,11 +1229,12 @@ function stopPlay(){
   render();
 }
 btnPlay.addEventListener("click", ()=>{ if(playRunning) stopPlay(); else startPlay(); });
+document.getElementById("chkShowHidden").addEventListener("change", (e)=>{ showHiddenInPlay = e.target.checked; });
 
 window.addEventListener("keydown",(e)=>{
   if(!playRunning) return;
-  if(["ArrowLeft","q","Q"].includes(e.key)) playInput.left=true;
-  if(["ArrowRight","d","D"].includes(e.key)) playInput.right=true;
+  if(["ArrowLeft","q","Q"].includes(e.key)){ playInput.left=true; e.preventDefault(); }
+  if(["ArrowRight","d","D"].includes(e.key)){ playInput.right=true; e.preventDefault(); }
   if(["ArrowUp"," ","w","W","z","Z"].includes(e.key)){ playInput.jumpQueued=true; e.preventDefault(); }
 });
 window.addEventListener("keyup",(e)=>{
@@ -1102,26 +1242,31 @@ window.addEventListener("keyup",(e)=>{
   if(["ArrowLeft","q","Q"].includes(e.key)) playInput.left=false;
   if(["ArrowRight","d","D"].includes(e.key)) playInput.right=false;
 });
+/* setPointerCapture : seul un vrai relâchement du doigt (pointerup/cancel)
+   arrête la commande. Sans ça, le moindre tremblement qui sort du bouton
+   déclenche "pointerleave" et coupe la touche alors que le doigt est
+   toujours posé — combiné au long-press mobile qui tente de sélectionner
+   le texte du bouton, ça donnait l'impression que le jeu se bloquait. */
 function bindHold(elm, onDown, onUp){
-  elm.addEventListener("pointerdown",(e)=>{ e.preventDefault(); onDown(); });
-  elm.addEventListener("pointerup", onUp); elm.addEventListener("pointerleave", onUp); elm.addEventListener("pointercancel", onUp);
+  elm.addEventListener("pointerdown",(e)=>{
+    e.preventDefault();
+    if(elm.setPointerCapture) elm.setPointerCapture(e.pointerId);
+    onDown();
+  });
+  elm.addEventListener("pointerup", onUp);
+  elm.addEventListener("pointercancel", onUp);
 }
 bindHold(document.getElementById("btnLeft"), ()=>playInput.left=true, ()=>playInput.left=false);
 bindHold(document.getElementById("btnRight"), ()=>playInput.right=true, ()=>playInput.right=false);
 bindHold(document.getElementById("btnJump"), ()=>playInput.jumpQueued=true, ()=>{});
 
-/* ---------------------------- Tiroirs mobiles ---------------------------- */
+/* ---------------------------- Tiroir mobile (palette) ---------------------------- */
 function closeMobileDrawers(){
   document.getElementById("palette").classList.remove("open");
-  document.getElementById("inspector").classList.remove("open");
 }
 document.getElementById("btnTogglePalette").addEventListener("click", ()=>{
-  document.getElementById("inspector").classList.remove("open");
+  setInspectorOpen(false);
   document.getElementById("palette").classList.toggle("open");
-});
-document.getElementById("btnToggleInspector").addEventListener("click", ()=>{
-  document.getElementById("palette").classList.remove("open");
-  document.getElementById("inspector").classList.toggle("open");
 });
 
 /* ---------------------------- Démarrage ---------------------------- */
@@ -1136,7 +1281,6 @@ document.getElementById("btnPanMode").addEventListener("click", (e)=>{
 window.addEventListener("resize", ()=>{ resizeCanvasToContainer(); render(); });
 
 buildPalette();
-refreshLevelSelect();
 renderLevelMeta();
 renderInspector();
 resizeCanvasToContainer();
