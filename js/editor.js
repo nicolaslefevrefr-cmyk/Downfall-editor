@@ -11,7 +11,9 @@
    ========================================================================= */
 
 const W = 800, H = 450;
-const GRAVITY = 2200, MOVE_SPEED = 240, JUMP_VELOCITY = -620, MAX_FALL = 900, STEP_UP = 14;
+const DEFAULT_GRAVITY = 2200;
+const MOVE_SPEED = 240, JUMP_VELOCITY = -620, MAX_FALL = 900, STEP_UP = 14;
+let currentGravity = DEFAULT_GRAVITY;
 const GRID = 20;
 
 /* ---------------------------- Bibliothèque d'objets (palette) ----------------------------
@@ -58,11 +60,28 @@ const ACTION_TYPES = [
   { type:"MOVE", label:"Translation à vitesse constante (MOVE)" },
   { type:"ROTATE", label:"Rotation continue (ROTATE)" },
 ];
+/* Actions disponibles sur la cible spéciale SCENE (paramètres globaux du
+   niveau) et sur la cible spéciale PLAYER (le personnage lui-même). */
+const SCENE_ACTION_TYPES = [
+  { type:"NONE", label:"Aucune" },
+  { type:"SET_GRAVITY", label:"Changer la gravité (SET_GRAVITY)" },
+];
+const PLAYER_ACTION_TYPES = [
+  { type:"NONE", label:"Aucune" },
+  { type:"MOVE", label:"Impulsion de déplacement (MOVE)" },
+  { type:"CHANGE_WIDTH", label:"Changer la largeur (CHANGE_WIDTH)" },
+  { type:"CHANGE_HEIGHT", label:"Changer la hauteur (CHANGE_HEIGHT)" },
+];
+function actionTypesForTarget(target){
+  if(target==="SCENE") return SCENE_ACTION_TYPES;
+  if(target==="PLAYER") return PLAYER_ACTION_TYPES;
+  return ACTION_TYPES;
+}
 
 /* ---------------------------- Modèle de document ---------------------------- */
 function makeEmptyLevel(id, name){
   return {
-    id, name, difficulty:1, playerStart:{x:40,y:372}, exit:{x:720,y:360,w:40,h:60},
+    id, name, difficulty:1, gravity:DEFAULT_GRAVITY, playerStart:{x:40,y:372}, exit:{x:720,y:360,w:40,h:60},
     /* Fermé en haut/gauche/droite par défaut : la seule façon de "sortir"
        est de tomber (mort) ou d'atteindre la sortie — jamais un bord d'écran.
        Ce sont des objets comme les autres : déplaçables/supprimables si
@@ -204,9 +223,7 @@ function drawObjectEditor(o, isSelected){
         ctx.beginPath(); ctx.moveTo(sx,o.y+o.h); ctx.lineTo(sx+o.w/6,o.y); ctx.lineTo(sx+o.w/3,o.y+o.h); ctx.closePath(); ctx.fill(); }
       break;
     case "door":
-      ctx.fillStyle="#3d5af1"; ctx.fillRect(o.x,o.y,o.w,o.h);
-      ctx.strokeStyle="#2a3fc0"; ctx.lineWidth=2; ctx.strokeRect(o.x,o.y,o.w,o.h);
-      ctx.fillStyle="#eef0ff"; ctx.beginPath(); ctx.arc(o.x+o.w-9,o.y+o.h/2,3,0,7); ctx.fill();
+      drawDoorShape(o.x,o.y,o.w,o.h, "#3d5af1", "#eef0ff", "#1f2d8a");
       break;
     case "button":
       drawStoneBrick(o.x,o.y,o.w,o.h);
@@ -237,6 +254,45 @@ function drawObjectEditor(o, isSelected){
     const hs = 12/view.zoom;
     ctx.fillStyle="#3d5af1"; ctx.fillRect(o.x+o.w-hs/2,o.y+o.h-hs/2,hs,hs);
   }
+}
+
+/* Porte : un cadre arrondi + un panneau intérieur + une barre + une
+   poignée, plutôt qu'un simple rectangle bleu. Partagée par le mode
+   édition et le mode test, et par la sortie et les objets "door". */
+function drawDoorShape(x,y,w,h, mainColor, panelColor, knobColor){
+  ctx.save();
+  const r = Math.min(w,h)*0.18;
+  ctx.fillStyle = mainColor;
+  ctx.beginPath();
+  ctx.moveTo(x, y+h);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.lineTo(x+w-r, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h);
+  ctx.closePath();
+  ctx.fill();
+
+  const pad = w*0.14;
+  const px=x+pad, py=y+pad*1.3, pw=w-pad*2, ph=h-pad*2.1;
+  const pr = pw*0.22;
+  ctx.fillStyle = panelColor;
+  ctx.beginPath();
+  ctx.moveTo(px, py+ph);
+  ctx.lineTo(px, py+pr);
+  ctx.quadraticCurveTo(px, py, px+pr, py);
+  ctx.lineTo(px+pw-pr, py);
+  ctx.quadraticCurveTo(px+pw, py, px+pw, py+pr);
+  ctx.lineTo(px+pw, py+ph);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = mainColor; ctx.lineWidth = Math.max(1.5, w*0.05);
+  ctx.beginPath(); ctx.moveTo(px, py+ph*0.55); ctx.lineTo(px+pw, py+ph*0.55); ctx.stroke();
+
+  ctx.fillStyle = knobColor;
+  ctx.beginPath(); ctx.arc(x+w-pad*1.3, y+h*0.55, Math.max(2, w*0.07), 0, Math.PI*2); ctx.fill();
+  ctx.restore();
 }
 
 function drawGrid(){
@@ -527,7 +583,8 @@ function renderLevelMeta(){
     el("input",{type:"text", value:lvl.name, oninput:(e)=>{ lvl.name=e.target.value; }}));
   const diffField = el("div",{class:"field"}, el("label",{text:"Difficulté (1-5)"}),
     el("input",{type:"number", min:"1", max:"5", value:lvl.difficulty, oninput:(e)=>{ lvl.difficulty=Math.max(1,Math.min(5,parseInt(e.target.value)||1)); }}));
-  levelMetaEl.appendChild(idField); levelMetaEl.appendChild(nameField); levelMetaEl.appendChild(diffField);
+  const gravField = numField("Gravité (px/s², défaut "+DEFAULT_GRAVITY+")", lvl.gravity!=null?lvl.gravity:DEFAULT_GRAVITY, v=>{ lvl.gravity=v; });
+  levelMetaEl.appendChild(idField); levelMetaEl.appendChild(nameField); levelMetaEl.appendChild(diffField); levelMetaEl.appendChild(gravField);
 }
 
 function numField(label, value, onchange){
@@ -562,6 +619,13 @@ function checkField(label, checked, onchange){
 function objectIdsExcept(id){
   return curLevel().objects.filter(o=>o.id!==id).map(o=>o.id);
 }
+/* Cibles spéciales de cascade, en plus des objets du niveau : SCENE (pour
+   changer un paramètre global comme la gravité) et PLAYER (pour agir
+   directement sur le personnage : taille, impulsion de déplacement). */
+const SPECIAL_TARGETS = ["SCENE", "PLAYER"];
+function allCascadeTargets(id){
+  return SPECIAL_TARGETS.concat(objectIdsExcept(id));
+}
 
 function renderActionParams(container, action, onchange){
   container.innerHTML = "";
@@ -583,6 +647,12 @@ function renderActionParams(container, action, onchange){
     container.appendChild(selectField("Sens", [{type:"cw",label:"Horaire"},{type:"ccw",label:"Antihoraire"}], action.direction||"cw", v=>{ action.direction=v; onchange(); }));
     container.appendChild(numField("Vitesse (degrés/s)", action.speed!=null?action.speed:90, v=>{ action.speed=v; onchange(); }));
     container.appendChild(numField("Durée (ms, 0 = indéfini)", action.duration!=null?action.duration:0, v=>{ action.duration=v; onchange(); }));
+  } else if(action.type==="SET_GRAVITY"){
+    container.appendChild(numField("Nouvelle gravité (px/s²)", action.value!=null?action.value:DEFAULT_GRAVITY, v=>{ action.value=v; onchange(); }));
+  } else if(action.type==="CHANGE_WIDTH"){
+    container.appendChild(numField("Nouvelle largeur du joueur (px)", action.value!=null?action.value:26, v=>{ action.value=v; onchange(); }));
+  } else if(action.type==="CHANGE_HEIGHT"){
+    container.appendChild(numField("Nouvelle hauteur du joueur (px)", action.value!=null?action.value:38, v=>{ action.value=v; onchange(); }));
   }
 }
 
@@ -700,11 +770,11 @@ function renderInspector(){
 
   // ---- Cascade (then) ----
   const casBox = el("div",{class:"sectionBox"});
-  casBox.appendChild(el("div",{class:"sectionTitle", text:"Cascade (déclenche d'autres objets)"}));
-  const others = objectIdsExcept(o.id);
+  casBox.appendChild(el("div",{class:"sectionTitle", text:"Cascade (déclenche d'autres objets, la scène ou le joueur)"}));
+  const others = allCascadeTargets(o.id);
   if(!o.trap.then) o.trap.then = [];
   if(!o.trap.then.length){
-    casBox.appendChild(el("p",{class:"empty", text:"Aucun lien. Utilise \"Lier →\" ci-dessous ou ajoute une entrée."}));
+    casBox.appendChild(el("p",{class:"empty", text:"Aucun lien. Utilise \"Lier →\" ci-dessous (objets uniquement) ou ajoute une entrée dans la liste (objets, SCENE, PLAYER)."}));
   }
   o.trap.then.forEach((link, idx)=>{
     const row = el("div",{class:"thenRow"});
@@ -713,10 +783,10 @@ function renderInspector(){
       el("button",{class:"miniBtn", text:"✕", onclick:()=>{ o.trap.then.splice(idx,1); renderInspector(); render(); }})
     );
     row.appendChild(top);
-    row.appendChild(selectField("Cible", others.map(id=>({type:id,label:id})), link.target, v=>{ link.target=v; renderInspector(); render(); }));
+    row.appendChild(selectField("Cible", others.map(id=>({type:id,label:id})), link.target, v=>{ link.target=v; link.action={type:"NONE"}; renderInspector(); render(); }));
     row.appendChild(numField("Délai (ms)", link.delay||0, v=>{ link.delay=v; }));
     if(!link.action) link.action = {type:"NONE"};
-    row.appendChild(selectField("Action sur la cible", ACTION_TYPES, link.action.type, v=>{ link.action={type:v}; renderInspector(); }));
+    row.appendChild(selectField("Action sur la cible", actionTypesForTarget(link.target), link.action.type, v=>{ link.action={type:v}; renderInspector(); }));
     const paramsWrap = el("div",{});
     row.appendChild(paramsWrap);
     renderActionParams(paramsWrap, link.action, ()=>{});
@@ -803,6 +873,13 @@ document.getElementById("fileImport").addEventListener("change", (e)=>{
   reader.readAsText(file);
   e.target.value = "";
 });
+document.getElementById("btnResetLevel").addEventListener("click", () => {
+  if(!confirm("Tout réinitialiser ? Le niveau en cours sera perdu (pense à l'exporter avant si besoin).")) return;
+  level = makeEmptyLevel("level1", "Niveau 1");
+  selectedId = null; mode="select"; placeKind=null; linkSourceId=null;
+  setInspectorOpen(false);
+  renderLevelMeta(); renderInspector(); refreshPaletteActive(); fitView(); render();
+});
 
 /* =========================================================================
    MODE TEST — réutilise le moteur du jeu (trigger/action/cascade + physique)
@@ -854,17 +931,28 @@ function playApplyAction(obj, action){
     case "APPEAR_TEMP": obj.visible=true; obj.solid=true; playScheduleTimer(action.ms||500, ()=>{ obj.visible=false; obj.solid=false; }); playFireCascade(obj); break;
     case "DISABLE": return;
     case "MOVE":
-      obj.state="moving";
+      /* Chaque MOVE ne pilote QUE l'axe correspondant à sa direction
+         (gauche/droite => X, haut/bas => Y), sans toucher à l'autre axe —
+         deux MOVE sur des axes différents s'additionnent donc en diagonale
+         au lieu de s'annuler. Un second MOVE sur le MÊME axe remplace
+         proprement le premier (comportement attendu). */
       {
         const speed = action.speed!=null?action.speed:100;
         const dir = action.direction||"right";
-        obj.moveTargetVx = dir==="left" ? -speed : dir==="right" ? speed : 0;
-        obj.moveTargetVy = dir==="up" ? -speed : dir==="down" ? speed : 0;
-        obj.moveAccel = action.acceleration || 0; // 0 = atteint la vitesse cible instantanément
-        if(!obj.moveAccel){ obj.moveVx = obj.moveTargetVx; obj.moveVy = obj.moveTargetVy; }
-        else { obj.moveVx = obj.moveVx || 0; obj.moveVy = obj.moveVy || 0; }
+        const axis = (dir==="left"||dir==="right") ? "x" : "y";
+        const target = axis==="x" ? (dir==="left"?-speed:speed) : (dir==="up"?-speed:speed);
+        const accel = action.acceleration || 0;
+        const prevV = axis==="x" ? (obj.moveX ? obj.moveX.v : 0) : (obj.moveY ? obj.moveY.v : 0);
+        const mover = { target, accel, v: accel ? prevV : target };
+        if(axis==="x") obj.moveX = mover; else obj.moveY = mover;
+        obj.state = "moving";
+        if(action.duration){
+          playScheduleTimer(action.duration, ()=>{
+            if(axis==="x") obj.moveX = null; else obj.moveY = null;
+            if(!obj.moveX && !obj.moveY) obj.state = "idle";
+          });
+        }
       }
-      if(action.duration){ playScheduleTimer(action.duration, ()=>{ obj.state="idle"; obj.moveVx=0; obj.moveVy=0; }); }
       playFireCascade(obj);
       break;
     case "ROTATE":
@@ -874,6 +962,37 @@ function playApplyAction(obj, action){
       playFireCascade(obj);
       break;
     default: playFireCascade(obj);
+  }
+}
+/* Actions sur les cibles spéciales SCENE et PLAYER (cf. SCENE_ACTION_TYPES /
+   PLAYER_ACTION_TYPES). Séparées de playApplyAction car ni la scène ni le
+   joueur ne sont des objets du niveau. */
+function applySceneAction(action){
+  if(action.type==="SET_GRAVITY"){
+    currentGravity = action.value!=null ? action.value : DEFAULT_GRAVITY;
+  }
+}
+function applyPlayerAction(action){
+  if(action.type==="CHANGE_WIDTH"){
+    const newW = action.value!=null ? action.value : 26;
+    P.x += (P.w-newW)/2; // recentre horizontalement pour éviter un saut brusque
+    P.w = newW;
+  } else if(action.type==="CHANGE_HEIGHT"){
+    const newH = action.value!=null ? action.value : 38;
+    P.y += (P.h-newH); // garde les pieds au même endroit (ancre en bas)
+    P.h = newH;
+  } else if(action.type==="MOVE"){
+    const speed = action.speed!=null?action.speed:100;
+    const dir = action.direction||"right";
+    const axis = (dir==="left"||dir==="right") ? "x" : "y";
+    const target = axis==="x" ? (dir==="left"?-speed:speed) : (dir==="up"?-speed:speed);
+    const accel = action.acceleration || 0;
+    const prevV = axis==="x" ? (P.moveX?P.moveX.v:0) : (P.moveY?P.moveY.v:0);
+    const mover = { target, accel, v: accel?prevV:target };
+    if(axis==="x") P.moveX=mover; else P.moveY=mover;
+    if(action.duration){
+      playScheduleTimer(action.duration, ()=>{ if(axis==="x") P.moveX=null; else P.moveY=null; });
+    }
   }
 }
 function playFireCascade(obj){
@@ -886,6 +1005,8 @@ function playFireCascade(obj){
   if(!def || !def.trap || !def.trap.then) return;
   for(const link of def.trap.then){
     playScheduleTimer(link.delay||0, ()=>{
+      if(link.target==="SCENE"){ applySceneAction(link.action); return; }
+      if(link.target==="PLAYER"){ applyPlayerAction(link.action); return; }
       const target = playObjects.find(o=>o.id===link.target);
       if(target){ target.triggered=true; playApplyAction(target, link.action); }
     });
@@ -930,8 +1051,9 @@ function playBuildLevel(){
   playObjectsById = {};
   for(const o of lvl.objects) playObjectsById[o.id]=o;
   P = { x:lvl.playerStart.x, y:lvl.playerStart.y, w:26, h:38, vx:0, vy:0, grounded:false, groundedOn:null,
-    prevGroundedOn:null, justLandedOn:null, justJumped:false, lastBump:null, lastGroundY:null, facing:1 };
+    prevGroundedOn:null, justLandedOn:null, justJumped:false, lastBump:null, lastGroundY:null, moveX:null, moveY:null, facing:1 };
   playTimers=[]; playNow=0; playMode="playing"; playLastCause=null; walkPhase=0; playPrevBox=null;
+  currentGravity = lvl.gravity!=null ? lvl.gravity : DEFAULT_GRAVITY;
   hidePlayMsg();
 }
 /* Boîte de collision effective d'un objet : pour un objet qui tourne, on
@@ -997,15 +1119,25 @@ function playUpdate(dt){
     o._lastDX = 0; o._lastDY = 0;
     if(o.state==="falling"){
       o.y += o.fallSpeed*dt; if(o.y>H+100){ o.visible=false; o.dead=true; }
-    } else if(o.state==="moving"){
-      if(o.moveAccel){
-        const maxStep = o.moveAccel*dt;
-        o.moveVx = approach(o.moveVx||0, o.moveTargetVx||0, maxStep);
-        o.moveVy = approach(o.moveVy||0, o.moveTargetVy||0, maxStep);
+    }
+    /* moveX et moveY sont deux "moteurs" indépendants (un par axe) : une
+       translation horizontale et une translation verticale peuvent tourner
+       EN PARALLÈLE sur le même objet (ex : MOVE droite pendant 1000ms +
+       MOVE haut décalé de 200ms => une diagonale), au lieu de s'écraser
+       l'une l'autre. */
+    if(o.moveX || o.moveY){
+      let dx=0, dy=0;
+      if(o.moveX){
+        o.moveX.v = o.moveX.accel ? approach(o.moveX.v, o.moveX.target, o.moveX.accel*dt) : o.moveX.target;
+        dx = o.moveX.v*dt;
       }
-      const dx=(o.moveVx||0)*dt, dy=(o.moveVy||0)*dt;
-      o.x += dx; o.y += dy; o._lastDX=dx; o._lastDY=dy;
-    } else if(o.state==="rotating"){
+      if(o.moveY){
+        o.moveY.v = o.moveY.accel ? approach(o.moveY.v, o.moveY.target, o.moveY.accel*dt) : o.moveY.target;
+        dy = o.moveY.v*dt;
+      }
+      o.x += dx; o.y += dy; o._lastDX += dx; o._lastDY += dy;
+    }
+    if(o.state==="rotating"){
       o.angle = (o.angle||0) + (o.rotateSpeed||0)*dt;
     }
   }
@@ -1017,6 +1149,18 @@ function playUpdate(dt){
   if(playInput.jumpQueued && P.grounded){ P.vy=JUMP_VELOCITY; P.grounded=false; P.groundedOn=null; P.justJumped=true; }
   playInput.jumpQueued=false;
 
+  /* Impulsion externe (action MOVE ciblant PLAYER, cf. applyPlayerAction) :
+     s'ajoute au déplacement piloté par les touches, sans jamais l'écraser —
+     même logique à deux axes indépendants que pour les objets. */
+  if(P.moveX){
+    P.moveX.v = P.moveX.accel ? approach(P.moveX.v, P.moveX.target, P.moveX.accel*dt) : P.moveX.target;
+    P.vx += P.moveX.v;
+  }
+  if(P.moveY){
+    P.moveY.v = P.moveY.accel ? approach(P.moveY.v, P.moveY.target, P.moveY.accel*dt) : P.moveY.target;
+    P.vy += P.moveY.v;
+  }
+
   /* Sous-pas physiques : à 240px/s et 60 img/s, une image déplace le joueur
      de 4px, et son corps fait 26px de large — l'écart réel à traverser sans
      aucun contact (largeur du trou moins largeur du joueur) est souvent
@@ -1027,7 +1171,7 @@ function playUpdate(dt){
   const SUBSTEPS = 4;
   const subDt = dt / SUBSTEPS;
   for(let s=0; s<SUBSTEPS; s++){
-    P.vy += GRAVITY*subDt; if(P.vy>MAX_FALL) P.vy=MAX_FALL;
+    P.vy += currentGravity*subDt; if(P.vy>MAX_FALL) P.vy=MAX_FALL;
     playResolve(subDt);
   }
 
@@ -1089,9 +1233,7 @@ function drawPlayObject(o){
         ctx.beginPath(); ctx.moveTo(sx,o.y+o.h); ctx.lineTo(sx+o.w/6,o.y); ctx.lineTo(sx+o.w/3,o.y+o.h); ctx.closePath(); ctx.fill(); } }
       break;
     case "door":
-      ctx.fillStyle="#3d5af1"; ctx.fillRect(o.x,o.y,o.w,o.h);
-      ctx.strokeStyle="#2a3fc0"; ctx.lineWidth=2; ctx.strokeRect(o.x,o.y,o.w,o.h);
-      ctx.fillStyle="#eef0ff"; ctx.beginPath(); ctx.arc(o.x+o.w-9,o.y+o.h/2,3,0,7); ctx.fill();
+      drawDoorShape(o.x,o.y,o.w,o.h, "#3d5af1", "#eef0ff", "#1f2d8a");
       break;
     case "button":
       drawStoneBrick(o.x,o.y,o.w,o.h);
@@ -1177,8 +1319,7 @@ function renderPlay(){
   const grad = ctx.createLinearGradient(0,0,0,H); grad.addColorStop(0,"#eef1fb"); grad.addColorStop(1,"#e2e6f6");
   ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
   const lvl = curLevel(); const ex = lvl.exit;
-  ctx.fillStyle = playMode==="won" ? "#2fb380" : "#59c98f"; ctx.fillRect(ex.x,ex.y,ex.w,ex.h);
-  ctx.fillStyle="#eafff3"; ctx.font="18px sans-serif"; ctx.textAlign="center"; ctx.fillText("🚪", ex.x+ex.w/2, ex.y+ex.h/2+7);
+  drawDoorShape(ex.x,ex.y,ex.w,ex.h, playMode==="won"?"#2fb380":"#3a9c6c", "#eafff3", "#164a33");
   for(const o of playObjects) drawPlayObject(o);
   ctx.save(); ctx.translate(P.x+P.w/2, P.y+P.h/2); ctx.scale(P.facing,1);
   drawStickFigure(P.w, P.h, P.grounded, walkPhase, playMode==="dead", Math.min(1, Math.abs(P.vx)/80));
