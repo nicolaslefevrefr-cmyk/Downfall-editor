@@ -881,6 +881,92 @@ document.getElementById("btnResetLevel").addEventListener("click", () => {
   renderLevelMeta(); renderInspector(); refreshPaletteActive(); fitView(); render();
 });
 
+/* ---------------------------- Fenêtre Firebase ---------------------------- */
+const fbBackdrop = document.getElementById("fbBackdrop");
+const fbModal = document.getElementById("fbModal");
+function openFirebaseModal(){
+  fbBackdrop.classList.add("show"); fbModal.classList.add("show");
+  const s = getFirebaseSettings();
+  document.getElementById("fbDatabaseUrl").value = s.databaseURL || "";
+  document.getElementById("fbAuthToken").value = s.authToken || "";
+  refreshFirebaseLevelList();
+}
+function closeFirebaseModal(){ fbBackdrop.classList.remove("show"); fbModal.classList.remove("show"); }
+document.getElementById("btnFirebase").addEventListener("click", openFirebaseModal);
+document.getElementById("fbModalClose").addEventListener("click", closeFirebaseModal);
+fbBackdrop.addEventListener("click", closeFirebaseModal);
+
+function setFirebaseTab(tab){
+  const isLoad = tab==="loadsave";
+  document.getElementById("fbTabLoadSave").classList.toggle("active", isLoad);
+  document.getElementById("fbTabSettings").classList.toggle("active", !isLoad);
+  document.getElementById("fbPanelLoadSave").style.display = isLoad ? "" : "none";
+  document.getElementById("fbPanelSettings").style.display = isLoad ? "none" : "";
+}
+document.getElementById("fbTabLoadSave").addEventListener("click", ()=>setFirebaseTab("loadsave"));
+document.getElementById("fbTabSettings").addEventListener("click", ()=>setFirebaseTab("settings"));
+
+document.getElementById("fbSaveSettingsBtn").addEventListener("click", ()=>{
+  const settings = {
+    databaseURL: document.getElementById("fbDatabaseUrl").value.trim(),
+    authToken: document.getElementById("fbAuthToken").value.trim(),
+  };
+  saveFirebaseSettings(settings);
+  const msg = document.getElementById("fbSettingsStatus");
+  msg.textContent = "Paramètres enregistrés."; msg.className = "fbStatusMsg ok";
+});
+
+document.getElementById("fbSaveBtn").addEventListener("click", async ()=>{
+  const status = document.getElementById("fbStatusSelect").value;
+  const msg = document.getElementById("fbSaveStatus");
+  msg.textContent = "Sauvegarde en cours…"; msg.className = "fbStatusMsg";
+  try{
+    await firebaseSaveLevel(level, status);
+    msg.textContent = "Niveau \""+level.name+"\" sauvegardé ("+status+")."; msg.className = "fbStatusMsg ok";
+    refreshFirebaseLevelList();
+  }catch(err){
+    msg.textContent = "Échec : " + err.message; msg.className = "fbStatusMsg error";
+  }
+});
+
+document.getElementById("fbRefreshBtn").addEventListener("click", refreshFirebaseLevelList);
+
+async function refreshFirebaseLevelList(){
+  const listEl = document.getElementById("fbLevelList");
+  listEl.innerHTML = '<p class="empty">Chargement…</p>';
+  try{
+    const levels = await firebaseListLevels();
+    const ids = Object.keys(levels);
+    if(!ids.length){ listEl.innerHTML = '<p class="empty">Aucun niveau sur Firebase pour l\'instant.</p>'; return; }
+    listEl.innerHTML = "";
+    for(const id of ids){
+      const lv = levels[id];
+      const row = document.createElement("div");
+      row.className = "fbLevelRow";
+      const status = lv.status === "FINAL" ? "FINAL" : "PRODUCTION";
+      row.innerHTML =
+        '<div><div class="fbName">'+(lv.name||id)+'</div>'+
+        '<div class="fbMeta">'+id+'</div></div>'+
+        '<div style="display:flex;align-items:center;gap:8px;">'+
+        '<span class="fbBadge '+status+'">'+status+'</span>'+
+        '<button class="tbtn" data-load-id="'+id+'">Charger</button>'+
+        '</div>';
+      row.querySelector("[data-load-id]").addEventListener("click", async ()=>{
+        try{
+          const loaded = await firebaseLoadLevel(id);
+          level = Object.assign(makeEmptyLevel(loaded.id||id, loaded.name||"Niveau"), loaded);
+          selectedId = null; mode="select"; placeKind=null; linkSourceId=null;
+          renderLevelMeta(); renderInspector(); refreshPaletteActive(); fitView(); render();
+          closeFirebaseModal();
+        }catch(err){ alert("Échec du chargement : " + err.message); }
+      });
+      listEl.appendChild(row);
+    }
+  }catch(err){
+    listEl.innerHTML = '<p class="empty">Erreur : '+err.message+'</p>';
+  }
+}
+
 /* =========================================================================
    MODE TEST — réutilise le moteur du jeu (trigger/action/cascade + physique)
    directement sur le niveau en cours d'édition, pour un aller-retour immédiat.

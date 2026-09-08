@@ -140,3 +140,42 @@ canvas{ display:block; width:100%; height:100%; touch-action:none; }
   #palette.open{ transform:translateX(0); }
   .drawerToggle{ display:inline-flex; }
 }
+
+/* ---------------------------- Modale (Firebase) ---------------------------- */
+.modalBackdrop{
+  display:none; position:fixed; inset:0; background:rgba(15,17,30,.45); z-index:60;
+}
+.modalBackdrop.show{ display:block; }
+.modal{
+  display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:420px; max-width:92vw; max-height:84vh; overflow-y:auto; background:var(--panel);
+  border-radius:14px; box-shadow:var(--shadow); z-index:61; padding:0;
+}
+.modal.show{ display:block; }
+.modalHeader{
+  display:flex; align-items:center; justify-content:space-between; padding:10px 12px;
+  border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--panel); z-index:1;
+}
+.modalTabs{ display:flex; gap:6px; }
+.modalTab{
+  border:1px solid var(--border); background:#fff; color:var(--muted); border-radius:8px;
+  padding:7px 11px; font-size:12.5px; cursor:pointer;
+}
+.modalTab.active{ border-color:var(--accent); color:var(--accent-2); background:#eef0ff; font-weight:600; }
+.modalPanel{ padding:14px; }
+.modalPanel h4{ font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:16px 0 8px; }
+.modalPanel h4:first-child{ margin-top:0; }
+.fbStatusMsg{ font-size:12.5px; margin-top:8px; min-height:1em; }
+.fbStatusMsg.error{ color:var(--danger); }
+.fbStatusMsg.ok{ color:var(--ok); }
+.fbLevelRow{
+  display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px;
+  border:1px solid var(--border); border-radius:10px; margin-top:8px;
+}
+.fbLevelRow .fbName{ font-weight:600; font-size:13px; }
+.fbLevelRow .fbMeta{ font-size:11px; color:var(--muted); }
+.fbBadge{
+  font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:6px; letter-spacing:.3px;
+}
+.fbBadge.FINAL{ background:#e3f7ee; color:#1d7a54; }
+.fbBadge.PRODUCTION{ background:#fdf1dc; color:#946213; }

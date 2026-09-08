@@ -21,6 +21,7 @@
       <input id="fileImport" type="file" accept="application/json" hidden>
       <button id="btnExport" class="tbtn">Exporter JSON</button>
       <button id="btnResetLevel" class="tbtn danger">↺ Tout réinitialiser</button>
+      <button id="btnFirebase" class="tbtn">☁ Firebase</button>
       <label class="tcheck"><input id="chkGrid" type="checkbox" checked> Grille</label>
     </div>
     <div class="tgroup">
@@ -73,6 +74,50 @@
   </footer>
 </div>
 
+<div id="fbBackdrop" class="modalBackdrop"></div>
+<div id="fbModal" class="modal">
+  <div class="modalHeader">
+    <div class="modalTabs">
+      <button id="fbTabLoadSave" class="modalTab active" type="button">Charger / Sauvegarder</button>
+      <button id="fbTabSettings" class="modalTab" type="button">Paramètres</button>
+    </div>
+    <button id="fbModalClose" class="tbtn">✕</button>
+  </div>
+
+  <div id="fbPanelLoadSave" class="modalPanel">
+    <h4>Sauvegarder le niveau actuel</h4>
+    <div class="field">
+      <label>Statut</label>
+      <select id="fbStatusSelect">
+        <option value="PRODUCTION">PRODUCTION — pas encore proposé dans le jeu</option>
+        <option value="FINAL">FINAL — jouable dans le jeu</option>
+      </select>
+    </div>
+    <button id="fbSaveBtn" class="tbtn primary" style="width:100%;">☁ Sauvegarder sur Firebase</button>
+    <div id="fbSaveStatus" class="fbStatusMsg"></div>
+
+    <h4>Niveaux sur Firebase</h4>
+    <button id="fbRefreshBtn" class="tbtn" style="width:100%;">↻ Actualiser la liste</button>
+    <div id="fbLevelList"></div>
+  </div>
+
+  <div id="fbPanelSettings" class="modalPanel" style="display:none;">
+    <p class="hint">Ces valeurs sont enregistrées dans ce navigateur. Le fichier <code>js/firebase-config.js</code> fournit les valeurs par défaut du site (à remplir une fois avant de déployer).</p>
+    <div class="field">
+      <label>URL de la base de données (databaseURL)</label>
+      <input id="fbDatabaseUrl" type="text" placeholder="https://xxxx-default-rtdb.firebaseio.com">
+    </div>
+    <div class="field">
+      <label>Jeton d'authentification (optionnel)</label>
+      <input id="fbAuthToken" type="text" placeholder="laisser vide si accès public">
+    </div>
+    <button id="fbSaveSettingsBtn" class="tbtn primary" style="width:100%;">Enregistrer</button>
+    <div id="fbSettingsStatus" class="fbStatusMsg"></div>
+  </div>
+</div>
+
+<script src="js/firebase-config.js"></script>
+<script src="js/firebase-rest.js"></script>
 <script src="js/editor.js"></script>
 <script>
 if("serviceWorker" in navigator){
