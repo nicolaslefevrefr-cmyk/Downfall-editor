@@ -211,6 +211,10 @@ function drawObjectEditor(o, isSelected){
   const invisibleInGame = (o.visible === false);
   ctx.save();
   if(invisibleInGame){ ctx.globalAlpha = 0.45; }
+  if(o.angle){
+    const cx = o.x+o.w/2, cy = o.y+o.h/2;
+    ctx.translate(cx,cy); ctx.rotate(o.angle*Math.PI/180); ctx.translate(-cx,-cy);
+  }
 
   switch(o.kind){
     case "static": case "decoy": drawBrick(o.x,o.y,o.w,o.h); break;
@@ -736,6 +740,15 @@ function renderInspector(){
   inspectorBody.appendChild(checkField("Dangereux au contact (hazard)", o.hazard, v=>{ o.hazard=v; }));
   inspectorBody.appendChild(checkField("Visible au démarrage", o.visible!==false, v=>{ o.visible=v; render(); }));
   inspectorBody.appendChild(checkField("Bloquant même invisible (sinon : invisible = non solide, tant qu'il n'est pas révélé)", o.solidWhenHidden, v=>{ o.solidWhenHidden=v; }));
+
+  if(o.kind==="hidden_spike"){
+    inspectorBody.appendChild(selectField("Direction du pic", [
+      {type:"0", label:"Vers le haut"},
+      {type:"90", label:"Vers la droite"},
+      {type:"180", label:"Vers le bas"},
+      {type:"270", label:"Vers la gauche"},
+    ], String(o.angle||0), v=>{ o.angle = parseInt(v,10); render(); }));
+  }
 
   inspectorBody.appendChild(textareaField("Description (affichée si le joueur meurt à cause de cet objet)", o.description, v=>{ o.description=v; }));
 
@@ -1525,7 +1538,28 @@ document.getElementById("btnPanMode").addEventListener("click", (e)=>{
   e.currentTarget.classList.toggle("active", panModeOn);
   canvas.style.cursor = panModeOn ? "grab" : "";
 });
-window.addEventListener("resize", ()=>{ resizeCanvasToContainer(); render(); });
+/* Redimensionnement de fenêtre "ordinaire" (bureau) : on garde le zoom/pan
+   actuels, juste la résolution du canvas qui suit. Un vrai changement
+   d'ORIENTATION (portrait <-> paysage, typiquement en tournant le
+   téléphone — aussi bien en PWA installée qu'en onglet de navigateur
+   normal) recadre la vue à la nouvelle forme de l'écran, sinon le contenu
+   resterait mal cadré (trop zoomé, décalé) après la rotation. */
+let lastOrientationPortrait = matchMedia("(orientation: portrait)").matches;
+function handleViewportChange(){
+  const nowPortrait = matchMedia("(orientation: portrait)").matches;
+  resizeCanvasToContainer();
+  if(nowPortrait !== lastOrientationPortrait){
+    lastOrientationPortrait = nowPortrait;
+    fitView();
+  }
+  render();
+}
+window.addEventListener("resize", handleViewportChange);
+window.addEventListener("orientationchange", ()=>{
+  // Sur certains navigateurs mobiles, les dimensions ne sont pas encore à
+  // jour au moment même de l'événement — un petit délai fiabilise la mesure.
+  setTimeout(handleViewportChange, 150);
+});
 
 buildPalette();
 renderLevelMeta();
