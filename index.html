@@ -77,10 +77,7 @@
 <div id="fbBackdrop" class="modalBackdrop"></div>
 <div id="fbModal" class="modal">
   <div class="modalHeader">
-    <div class="modalTabs">
-      <button id="fbTabLoadSave" class="modalTab active" type="button">Charger / Sauvegarder</button>
-      <button id="fbTabSettings" class="modalTab" type="button">Paramètres</button>
-    </div>
+    <h3 style="margin:0;font-size:14px;">☁ Firebase</h3>
     <button id="fbModalClose" class="tbtn">✕</button>
   </div>
 
@@ -99,20 +96,6 @@
     <h4>Niveaux sur Firebase</h4>
     <button id="fbRefreshBtn" class="tbtn" style="width:100%;">↻ Actualiser la liste</button>
     <div id="fbLevelList"></div>
-  </div>
-
-  <div id="fbPanelSettings" class="modalPanel" style="display:none;">
-    <p class="hint">Ces valeurs sont enregistrées dans ce navigateur. Le fichier <code>js/firebase-config.js</code> fournit les valeurs par défaut du site (à remplir une fois avant de déployer).</p>
-    <div class="field">
-      <label>URL de la base de données (databaseURL)</label>
-      <input id="fbDatabaseUrl" type="text" placeholder="https://xxxx-default-rtdb.firebaseio.com">
-    </div>
-    <div class="field">
-      <label>Jeton d'authentification (optionnel)</label>
-      <input id="fbAuthToken" type="text" placeholder="laisser vide si accès public">
-    </div>
-    <button id="fbSaveSettingsBtn" class="tbtn primary" style="width:100%;">Enregistrer</button>
-    <div id="fbSettingsStatus" class="fbStatusMsg"></div>
   </div>
 </div>
 

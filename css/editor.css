@@ -1,0 +1,109 @@
+/* =========================================================================
+   Éditeur — styles additifs (viennent après style.css : réutilise les
+   variables --bg/--panel/--text/--accent/--border/--shadow définies là-bas)
+   ========================================================================= */
+
+.editorBody{ overflow:hidden; }
+
+#titleBlock{ flex:1; padding:0 6px; }
+#levelNameInput{
+  width:100%; border:none; background:transparent; font-weight:700; font-size:15px;
+  color:var(--text); text-align:center; padding:6px 4px; border-radius:8px;
+}
+#levelNameInput:focus{ background:#eef0fb; outline:none; }
+
+/* barre d'outils */
+#toolbar{
+  flex:0 0 auto; display:flex; align-items:center; gap:6px; padding:8px 10px;
+  background:var(--panel); border-bottom:1px solid var(--border); overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+}
+.tbtn{
+  flex:0 0 auto; border:1px solid var(--border); background:#fff; color:var(--text);
+  font-size:13px; padding:8px 12px; border-radius:10px; cursor:pointer; white-space:nowrap;
+}
+.tbtn:active{ background:#eef0fb; }
+.tbtn.active{ background:#eef0ff; border-color:var(--accent); color:var(--accent-2); }
+.tbtn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700; }
+.tbtn.primary:active{ background:var(--accent-2); }
+.tsep{ flex:0 0 auto; width:1px; align-self:stretch; background:var(--border); margin:0 2px; }
+#sampleSelect{ font-family:inherit; }
+
+#canvasWrap{ cursor:default; }
+#exitTestBtn{
+  position:absolute; top:10px; right:10px; border:none; background:rgba(20,22,36,.55);
+  color:#fff; font-size:13px; padding:8px 14px; border-radius:10px; cursor:pointer;
+}
+#exitTestBtn:active{ background:rgba(20,22,36,.75); }
+
+#testControls{
+  position:absolute; left:0; right:0; bottom:0; display:flex; justify-content:space-between;
+  align-items:flex-end; padding:14px; pointer-events:none;
+}
+#testControls .ctrl{ pointer-events:auto; width:64px; height:64px; font-size:24px; }
+.hidden{ display:none !important; }
+
+/* tiroirs latéraux génériques (gauche = palette, droite = propriétés) */
+.drawerBackdrop{
+  position:fixed; inset:0; background:rgba(15,17,30,.35); opacity:0; pointer-events:none;
+  transition:opacity .2s ease; z-index:29;
+}
+.drawerBackdrop.show{ opacity:1; pointer-events:auto; }
+.sideDrawer{
+  position:fixed; top:0; height:100%; width:300px; max-width:88vw; background:var(--panel);
+  z-index:30; padding:16px; overflow-y:auto; transition:transform .22s ease;
+}
+.sideDrawer.left{ left:0; transform:translateX(-100%); box-shadow:8px 0 24px rgba(20,22,40,.15); }
+.sideDrawer.right{ right:0; transform:translateX(100%); box-shadow:-8px 0 24px rgba(20,22,40,.15); }
+.sideDrawer.open{ transform:translateX(0); }
+.sideDrawer h3{ font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:18px 0 8px; }
+.sideDrawer h3:first-of-type{ margin-top:4px; }
+.closeDrawerBtn{
+  position:absolute; top:12px; right:12px; width:36px; height:36px; border-radius:10px;
+  border:1px solid var(--border); background:#fff; cursor:pointer; font-size:15px;
+}
+
+.paletteGrid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.paletteItem{
+  display:flex; flex-direction:column; align-items:center; gap:4px; padding:12px 6px;
+  border:1px solid var(--border); border-radius:12px; background:#fff; cursor:pointer;
+  font-size:20px; color:var(--text);
+}
+.paletteItem span{ font-size:10.5px; color:var(--muted); text-align:center; line-height:1.2; }
+.paletteItem.active{ border-color:var(--accent); background:#eef0ff; }
+.paletteItem:active{ background:#eef0fb; }
+
+/* formulaire de propriétés */
+.fRow{ margin-bottom:10px; }
+.fRow label{ display:block; font-size:11.5px; color:var(--muted); margin-bottom:4px; }
+.fRow input[type="text"], .fRow input[type="number"], .fRow select, .fRow textarea{
+  width:100%; border:1px solid var(--border); border-radius:8px; padding:8px 10px;
+  font-size:13px; font-family:inherit; color:var(--text); background:#fff;
+}
+.fRow textarea{ min-height:56px; resize:vertical; }
+.fRow2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.fRow3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+.fCheck{ display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:8px; }
+.fCheck input{ width:16px; height:16px; }
+.fieldset{
+  border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-bottom:12px;
+}
+.fieldset legend{ font-size:11.5px; font-weight:700; color:var(--accent-2); padding:0 4px; }
+.linkRow{
+  border:1px dashed var(--border); border-radius:10px; padding:8px; margin-bottom:8px; position:relative;
+}
+.linkRow .removeLink{
+  position:absolute; top:6px; right:6px; width:22px; height:22px; border-radius:6px; border:none;
+  background:#f3e3e3; color:var(--danger); font-size:12px; cursor:pointer;
+}
+.smallBtn{
+  border:1px solid var(--border); background:#fff; color:var(--accent-2); font-size:12.5px;
+  padding:7px 10px; border-radius:8px; cursor:pointer; width:100%;
+}
+.smallBtn:active{ background:#eef0fb; }
+.dangerBtn{ color:var(--danger); }
+
+.warnItem{
+  font-size:12.5px; padding:8px 10px; border-radius:10px; margin-bottom:6px;
+  background:#fff4e8; border:1px solid #f0d3ad; color:#8a5a1c;
+}

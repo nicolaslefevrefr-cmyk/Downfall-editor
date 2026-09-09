@@ -7,30 +7,14 @@
    proposer aux joueurs.
    ========================================================================= */
 
-const FIREBASE_SETTINGS_KEY = "chutelibre_firebase_settings_v1";
-
-/* Les réglages effectifs = ceux enregistrés en local (localStorage) s'il y
-   en a, sinon les valeurs par défaut du fichier firebase-config.js — ainsi
-   l'utilisateur peut tester avec d'autres identifiants sans toucher au
-   fichier livré avec le site. */
+/* Les réglages de connexion viennent uniquement de js/firebase-config.js —
+   pas de surcouche modifiable depuis l'interface. Pour changer de base, on
+   modifie ce fichier directement avant de déployer. */
 function getFirebaseSettings(){
-  try{
-    const raw = localStorage.getItem(FIREBASE_SETTINGS_KEY);
-    if(raw){
-      const saved = JSON.parse(raw);
-      return {
-        databaseURL: saved.databaseURL || (typeof FIREBASE_CONFIG!=="undefined" ? FIREBASE_CONFIG.databaseURL : "") || "",
-        authToken: saved.authToken || (typeof FIREBASE_CONFIG!=="undefined" ? FIREBASE_CONFIG.authToken : "") || "",
-      };
-    }
-  }catch(e){}
   return {
     databaseURL: (typeof FIREBASE_CONFIG!=="undefined" ? FIREBASE_CONFIG.databaseURL : "") || "",
     authToken: (typeof FIREBASE_CONFIG!=="undefined" ? FIREBASE_CONFIG.authToken : "") || "",
   };
-}
-function saveFirebaseSettings(settings){
-  try{ localStorage.setItem(FIREBASE_SETTINGS_KEY, JSON.stringify(settings)); }catch(e){}
 }
 
 function firebaseUrl(path, settings){

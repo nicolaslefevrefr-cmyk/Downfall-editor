@@ -19,6 +19,6 @@
    (localStorage) — pratique pour tester avec un autre projet sans modifier
    ce fichier. Ce fichier reste la config "de base" livrée avec le site. */
 const FIREBASE_CONFIG = {
-  databaseURL: "",
+  databaseURL: "https://downfall-e1bec-default-rtdb.firebaseio.com",
   authToken: "",
 };

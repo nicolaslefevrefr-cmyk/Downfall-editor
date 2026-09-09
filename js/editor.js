@@ -79,9 +79,16 @@ function actionTypesForTarget(target){
 }
 
 /* ---------------------------- Modèle de document ---------------------------- */
+/* Identifiant aléatoire tiré à la création d'un niveau — sert de clé sur
+   Firebase et d'ordre de classement dans le serpentin du jeu (les niveaux
+   sont triés par cet identifiant, pas par leur nom). Purement numérique :
+   toujours une clé valide pour la Realtime Database. */
+function randomLevelId(){
+  return String(Math.floor(100000000 + Math.random()*900000000));
+}
 function makeEmptyLevel(id, name){
   return {
-    id, name, difficulty:1, gravity:DEFAULT_GRAVITY, playerStart:{x:40,y:372}, exit:{x:720,y:360,w:40,h:60},
+    id: id || randomLevelId(), name, difficulty:1, gravity:DEFAULT_GRAVITY, playerStart:{x:40,y:372}, exit:{x:720,y:360,w:40,h:60},
     /* Fermé en haut/gauche/droite par défaut : la seule façon de "sortir"
        est de tomber (mort) ou d'atteindre la sortie — jamais un bord d'écran.
        Ce sont des objets comme les autres : déplaçables/supprimables si
@@ -93,7 +100,7 @@ function makeEmptyLevel(id, name){
     ],
   };
 }
-let level = makeEmptyLevel("level1", "Niveau 1");
+let level = makeEmptyLevel(null, "Niveau 1");
 function curLevel(){ return level; }
 
 let selectedId = null;
@@ -865,7 +872,7 @@ document.getElementById("fileImport").addEventListener("change", (e)=>{
       else if(parsed.levels) imported = parsed.levels[0];
       else imported = parsed;
       if(!imported || !imported.objects) throw new Error("format de niveau inattendu");
-      level = Object.assign(makeEmptyLevel(imported.id||"level1", imported.name||"Niveau"), imported);
+      level = Object.assign(makeEmptyLevel(imported.id||null, imported.name||"Niveau"), imported);
       selectedId = null; mode="select"; placeKind=null; linkSourceId=null;
       renderLevelMeta(); renderInspector(); refreshPaletteActive(); fitView(); render();
     }catch(err){ alert("Fichier JSON invalide : "+err.message); }
@@ -875,7 +882,7 @@ document.getElementById("fileImport").addEventListener("change", (e)=>{
 });
 document.getElementById("btnResetLevel").addEventListener("click", () => {
   if(!confirm("Tout réinitialiser ? Le niveau en cours sera perdu (pense à l'exporter avant si besoin).")) return;
-  level = makeEmptyLevel("level1", "Niveau 1");
+  level = makeEmptyLevel(null, "Niveau 1");
   selectedId = null; mode="select"; placeKind=null; linkSourceId=null;
   setInspectorOpen(false);
   renderLevelMeta(); renderInspector(); refreshPaletteActive(); fitView(); render();
@@ -886,35 +893,12 @@ const fbBackdrop = document.getElementById("fbBackdrop");
 const fbModal = document.getElementById("fbModal");
 function openFirebaseModal(){
   fbBackdrop.classList.add("show"); fbModal.classList.add("show");
-  const s = getFirebaseSettings();
-  document.getElementById("fbDatabaseUrl").value = s.databaseURL || "";
-  document.getElementById("fbAuthToken").value = s.authToken || "";
   refreshFirebaseLevelList();
 }
 function closeFirebaseModal(){ fbBackdrop.classList.remove("show"); fbModal.classList.remove("show"); }
 document.getElementById("btnFirebase").addEventListener("click", openFirebaseModal);
 document.getElementById("fbModalClose").addEventListener("click", closeFirebaseModal);
 fbBackdrop.addEventListener("click", closeFirebaseModal);
-
-function setFirebaseTab(tab){
-  const isLoad = tab==="loadsave";
-  document.getElementById("fbTabLoadSave").classList.toggle("active", isLoad);
-  document.getElementById("fbTabSettings").classList.toggle("active", !isLoad);
-  document.getElementById("fbPanelLoadSave").style.display = isLoad ? "" : "none";
-  document.getElementById("fbPanelSettings").style.display = isLoad ? "none" : "";
-}
-document.getElementById("fbTabLoadSave").addEventListener("click", ()=>setFirebaseTab("loadsave"));
-document.getElementById("fbTabSettings").addEventListener("click", ()=>setFirebaseTab("settings"));
-
-document.getElementById("fbSaveSettingsBtn").addEventListener("click", ()=>{
-  const settings = {
-    databaseURL: document.getElementById("fbDatabaseUrl").value.trim(),
-    authToken: document.getElementById("fbAuthToken").value.trim(),
-  };
-  saveFirebaseSettings(settings);
-  const msg = document.getElementById("fbSettingsStatus");
-  msg.textContent = "Paramètres enregistrés."; msg.className = "fbStatusMsg ok";
-});
 
 document.getElementById("fbSaveBtn").addEventListener("click", async ()=>{
   const status = document.getElementById("fbStatusSelect").value;
@@ -1160,6 +1144,13 @@ function effectiveBox(o){
   return o;
 }
 function playResolve(dt){
+  /* fallSign = sens de la gravité actuelle (1 = normale, -1 = inversée).
+     Toute la résolution ci-dessous est symétrique par rapport à ce signe :
+     avec une gravité inversée, "atterrir" veut dire se coller au DESSOUS
+     d'une plateforme (le sol est au plafond), et le rattrapage de saut
+     s'applique vers une plateforme plus basse (dans le sens opposé à la
+     gravité) plutôt que plus haute. */
+  const fallSign = currentGravity >= 0 ? 1 : -1;
   const prevBottom=P.y+P.h, prevTop=P.y;
   P.x += P.vx*dt; P.y += P.vy*dt;
   P.grounded=false; P.groundedOn=null;
@@ -1171,25 +1162,46 @@ function playResolve(dt){
     if(o.visible===false && !o.solidWhenHidden) continue;
     const box = effectiveBox(o);
     if(!playOverlap(P,box)) continue;
-    if(P.vy>=0 && prevBottom<=box.y+2){ P.y=box.y-P.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y; continue; }
-    if(P.vy<0 && prevTop>=box.y+box.h-2){ P.y=box.y+box.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; continue; }
+
+    if(fallSign>0){
+      if(P.vy>=0 && prevBottom<=box.y+2){ P.y=box.y-P.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y; continue; }
+      if(P.vy<0 && prevTop>=box.y+box.h-2){ P.y=box.y+box.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; continue; }
+    } else {
+      if(P.vy<=0 && prevTop>=box.y+box.h-2){ P.y=box.y+box.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y+box.h; continue; }
+      if(P.vy>0 && prevBottom<=box.y+2){ P.y=box.y-P.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; continue; }
+    }
+
     const overlapX = Math.min(P.x+P.w,box.x+box.w)-Math.max(P.x,box.x);
     const overlapY = Math.min(P.y+P.h,box.y+box.h)-Math.max(P.y,box.y);
     if(overlapX<overlapY){
-      /* Aide au pas : seulement pour grimper sur une plateforme nettement
-         plus HAUTE que celle qu'on vient de quitter (un saut à peine trop
-         court). Si la cible est à la même hauteur (ou plus basse), on ne
-         rattrape pas — sinon ça bouche aussi les petits trous qu'on
-         traverse simplement en marchant, ce qui n'est pas voulu. */
-      const shortfall = prevBottom - box.y;
-      const targetIsRaised = P.lastGroundY==null || box.y < P.lastGroundY - 2;
-      if(targetIsRaised && shortfall>0 && shortfall<=STEP_UP && P.vy>=0){
-        P.y=box.y-P.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y;
+      /* Aide au pas : mesurée par rapport à la position AVANT le déplacement
+         de cette image, et seulement pour grimper vers une plateforme
+         nettement plus proche du "plafond effectif" que celle qu'on vient
+         de quitter (un saut à peine trop court) — jamais pour boucher un
+         petit trou qu'on traverse simplement en marchant. */
+      let shortfall, targetIsRaised, movingTowardSurface;
+      if(fallSign>0){
+        shortfall = prevBottom - box.y;
+        targetIsRaised = P.lastGroundY==null || box.y < P.lastGroundY - 2;
+        movingTowardSurface = P.vy>=0;
+      } else {
+        shortfall = (box.y+box.h) - prevTop;
+        targetIsRaised = P.lastGroundY==null || (box.y+box.h) > P.lastGroundY + 2;
+        movingTowardSurface = P.vy<=0;
+      }
+      if(targetIsRaised && shortfall>0 && shortfall<=STEP_UP && movingTowardSurface){
+        if(fallSign>0){ P.y=box.y-P.h; P.lastGroundY=box.y; } else { P.y=box.y+box.h; P.lastGroundY=box.y+box.h; }
+        P.vy=0; P.grounded=true; P.groundedOn=o.id;
       }
       else { if(P.x<box.x) P.x-=overlapX; else P.x+=overlapX; P.vx=0; }
     } else {
-      if(P.y<box.y){ P.y-=overlapY; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y; }
-      else { P.y+=overlapY; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
+      if(fallSign>0){
+        if(P.y<box.y){ P.y-=overlapY; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y; }
+        else { P.y+=overlapY; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
+      } else {
+        if(P.y+P.h>box.y+box.h){ P.y+=overlapY; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y+box.h; }
+        else { P.y-=overlapY; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
+      }
     }
   }
   if(P.x<0) P.x=0; if(P.x+P.w>W) P.x=W-P.w;
@@ -1232,7 +1244,13 @@ function playUpdate(dt){
   if(P.vx>0) P.facing=1; else if(P.vx<0) P.facing=-1;
   walkPhase += Math.abs(P.vx)*dt*0.15;
   P.justJumped=false;
-  if(playInput.jumpQueued && P.grounded){ P.vy=JUMP_VELOCITY; P.grounded=false; P.groundedOn=null; P.justJumped=true; }
+  if(playInput.jumpQueued && P.grounded){
+    /* Le saut pousse toujours à l'OPPOSÉ du sens de la gravité actuelle :
+       avec une gravité inversée (on est collé au plafond), sauter pousse
+       vers le bas, pas vers le haut. */
+    P.vy = currentGravity>=0 ? JUMP_VELOCITY : -JUMP_VELOCITY;
+    P.grounded=false; P.groundedOn=null; P.justJumped=true;
+  }
   playInput.jumpQueued=false;
 
   /* Impulsion externe (action MOVE ciblant PLAYER, cf. applyPlayerAction) :
@@ -1257,7 +1275,9 @@ function playUpdate(dt){
   const SUBSTEPS = 4;
   const subDt = dt / SUBSTEPS;
   for(let s=0; s<SUBSTEPS; s++){
-    P.vy += currentGravity*subDt; if(P.vy>MAX_FALL) P.vy=MAX_FALL;
+    P.vy += currentGravity*subDt;
+    if(P.vy>MAX_FALL) P.vy=MAX_FALL;
+    if(P.vy<-MAX_FALL) P.vy=-MAX_FALL;
     playResolve(subDt);
   }
 
@@ -1407,7 +1427,7 @@ function renderPlay(){
   const lvl = curLevel(); const ex = lvl.exit;
   drawDoorShape(ex.x,ex.y,ex.w,ex.h, playMode==="won"?"#2fb380":"#3a9c6c", "#eafff3", "#164a33");
   for(const o of playObjects) drawPlayObject(o);
-  ctx.save(); ctx.translate(P.x+P.w/2, P.y+P.h/2); ctx.scale(P.facing,1);
+  ctx.save(); ctx.translate(P.x+P.w/2, P.y+P.h/2); ctx.scale(P.facing, currentGravity<0 ? -1 : 1);
   drawStickFigure(P.w, P.h, P.grounded, walkPhase, playMode==="dead", Math.min(1, Math.abs(P.vx)/80));
   ctx.restore();
   ctx.restore();

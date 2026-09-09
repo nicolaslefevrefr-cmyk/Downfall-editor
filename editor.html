@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3d5af1">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<title>Éditeur — Chute Libre</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/editor.css">
+</head>
+<body class="editorBody">
+<div id="app">
+  <header id="topbar">
+    <button id="paletteBtn" class="iconBtn" aria-label="Palette">☰</button>
+    <div id="titleBlock">
+      <input id="levelNameInput" type="text" value="Nouveau niveau" />
+    </div>
+    <button id="propsToggleBtn" class="iconBtn" aria-label="Propriétés">⚙</button>
+  </header>
+
+  <div id="toolbar">
+    <button id="toolSelectBtn" class="tbtn active" title="Sélection">↖</button>
+    <button id="undoBtn" class="tbtn" title="Annuler (Ctrl+Z)">↶</button>
+    <button id="redoBtn" class="tbtn" title="Rétablir (Ctrl+Shift+Z)">↷</button>
+    <button id="snapBtn" class="tbtn active" title="Aligner sur la grille">#</button>
+    <span class="tsep"></span>
+    <button id="testBtn" class="tbtn primary" title="Tester le niveau">▶ Tester</button>
+    <span class="tsep"></span>
+    <button id="newBtn" class="tbtn" title="Nouveau niveau">＋ Nouveau</button>
+    <select id="sampleSelect" class="tbtn" title="Charger un modèle"></select>
+    <button id="importBtn" class="tbtn" title="Importer un JSON">⬆ Importer</button>
+    <input type="file" id="importFile" accept="application/json" hidden>
+    <button id="exportBtn" class="tbtn" title="Exporter en JSON">⬇ Exporter</button>
+  </div>
+
+  <main id="stage">
+    <div id="canvasWrap">
+      <canvas id="game" width="800" height="450"></canvas>
+      <div id="overlay">
+        <div id="overlayCard">
+          <h2 id="overlayTitle">—</h2>
+          <p id="overlayText">—</p>
+          <button id="overlayBtn">Rejouer</button>
+        </div>
+      </div>
+      <div id="testControls" class="hidden">
+        <div class="dpad">
+          <button id="btnLeft" class="ctrl">◀</button>
+          <button id="btnRight" class="ctrl">▶</button>
+        </div>
+        <button id="btnJump" class="ctrl ctrlJump">⤒</button>
+      </div>
+      <button id="exitTestBtn" class="hidden">✕ Quitter le test</button>
+    </div>
+  </main>
+</div>
+
+<div id="paletteBackdrop" class="drawerBackdrop"></div>
+<aside id="paletteDrawer" class="sideDrawer left">
+  <button class="closeDrawerBtn" data-close="palette">✕</button>
+  <h3>Repères</h3>
+  <div class="paletteGrid">
+    <button class="paletteItem" id="pickPlayerStart">🏁<span>Départ</span></button>
+    <button class="paletteItem" id="pickExit">🏆<span>Sortie</span></button>
+  </div>
+  <h3>Blocs</h3>
+  <div class="paletteGrid">
+    <button class="paletteItem" data-kind="static">🧱<span>Brique</span></button>
+    <button class="paletteItem" data-kind="falling">🧱⤵<span>Plateforme piégée</span></button>
+    <button class="paletteItem" data-kind="hidden_spike">📍<span>Pic caché</span></button>
+    <button class="paletteItem" data-kind="door">🚪<span>Porte</span></button>
+    <button class="paletteItem" data-kind="button">🔘<span>Bouton</span></button>
+    <button class="paletteItem" data-kind="gate">🚧<span>Porte verrouillée</span></button>
+    <button class="paletteItem" data-kind="blocker">⬛<span>Bloc surgissant</span></button>
+    <button class="paletteItem" data-kind="sensor">📡<span>Capteur (invisible)</span></button>
+  </div>
+  <h3>Kits (assemblages prêts)</h3>
+  <div class="paletteGrid">
+    <button class="paletteItem" data-kit="cascade">⇣⇣<span>Cascade B→A</span></button>
+    <button class="paletteItem" data-kit="fakeExit">🚪❌<span>Fausse sortie</span></button>
+    <button class="paletteItem" data-kit="lockedGate">🔒<span>Porte + bouton</span></button>
+    <button class="paletteItem" data-kit="jumpBlocker">🧱🔺<span>Plafond piège</span></button>
+  </div>
+  <p class="hint">Clique un élément puis clique sur le niveau pour le poser. Les kits posent plusieurs éléments déjà reliés entre eux.</p>
+</aside>
+
+<div id="propsBackdrop" class="drawerBackdrop"></div>
+<aside id="propsDrawer" class="sideDrawer right">
+  <button class="closeDrawerBtn" data-close="props">✕</button>
+  <h3>Niveau</h3>
+  <div id="levelMetaForm"></div>
+  <h3>Propriétés</h3>
+  <div id="propsForm"><p class="hint">Sélectionne un élément sur le niveau.</p></div>
+  <h3>Validation</h3>
+  <div id="validationList"><p class="hint">Aucun souci détecté.</p></div>
+</aside>
+
+<script src="js/levels.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/render.js"></script>
+<script src="js/editor.js"></script>
+</body>
+</html>
