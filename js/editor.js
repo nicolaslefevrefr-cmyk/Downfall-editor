@@ -217,21 +217,19 @@ function drawObjectEditor(o, isSelected){
   }
 
   switch(o.kind){
-    case "static": case "decoy": drawBrick(o.x,o.y,o.w,o.h); break;
+    case "static": case "decoy": drawBlockTile(o.x,o.y,o.w,o.h); break;
     case "falling":
-      drawBrick(o.x,o.y,o.w,o.h);
+      drawBlockTile(o.x,o.y,o.w,o.h);
       ctx.strokeStyle="rgba(40,20,10,.5)"; ctx.lineWidth=1.5;
       ctx.beginPath(); ctx.moveTo(o.x+o.w*0.32,o.y+2); ctx.lineTo(o.x+o.w*0.45,o.y+o.h*0.6); ctx.lineTo(o.x+o.w*0.38,o.y+o.h-2); ctx.stroke();
       break;
-    case "gate": drawStoneBrick(o.x,o.y,o.w,o.h); break;
+    case "gate": drawBlockTile(o.x,o.y,o.w,o.h); break;
     case "blocker":
-      drawBrick(o.x,o.y,o.w,o.h);
+      drawBlockTile(o.x,o.y,o.w,o.h);
       ctx.strokeStyle="rgba(224,69,92,.6)"; ctx.lineWidth=2; ctx.strokeRect(o.x+1,o.y+1,o.w-2,o.h-2);
       break;
     case "hidden_spike":
-      ctx.fillStyle="#e0455c";
-      for(let i=0;i<3;i++){ const sx=o.x+i*(o.w/3);
-        ctx.beginPath(); ctx.moveTo(sx,o.y+o.h); ctx.lineTo(sx+o.w/6,o.y); ctx.lineTo(sx+o.w/3,o.y+o.h); ctx.closePath(); ctx.fill(); }
+      drawPlantRow(o.x,o.y,o.w,o.h);
       break;
     case "door":
       drawDoorShape(o.x,o.y,o.w,o.h, "#3d5af1", "#eef0ff", "#1f2d8a");
@@ -304,6 +302,104 @@ function drawDoorShape(x,y,w,h, mainColor, panelColor, knobColor){
   ctx.fillStyle = knobColor;
   ctx.beginPath(); ctx.arc(x+w-pad*1.3, y+h*0.55, Math.max(2, w*0.07), 0, Math.PI*2); ctx.fill();
   ctx.restore();
+}
+
+/* Carrelage du bloc Mario (block.png, 16x16 d'origine), mis à l'échelle
+   sur la grille du niveau (GRID) — même logique que le rendu du vrai jeu
+   (render.js), dupliquée ici pour le mode édition ET le mode test qui ont
+   chacun leur propre contexte canvas (`ctx`, pas `ctx2d`). Tant que
+   l'image n'est pas chargée, repli sur l'ancien motif vectoriel. */
+function drawBlockTile(x,y,w,h){
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+  if(SPRITE_BLOCK.complete && SPRITE_BLOCK.naturalWidth>0){
+    ctx.imageSmoothingEnabled = false;
+    const startX = Math.floor(x/GRID)*GRID;
+    const startY = Math.floor(y/GRID)*GRID;
+    for(let ty=startY; ty<y+h; ty+=GRID){
+      for(let tx=startX; tx<x+w; tx+=GRID){
+        ctx.drawImage(SPRITE_BLOCK, tx, ty, GRID, GRID);
+      }
+    }
+  } else {
+    drawBrick(x,y,w,h);
+  }
+  ctx.restore();
+}
+
+/* Plante piranha : une image par unité de grille de largeur (GRID), toutes
+   animées EN MÊME TEMPS (horloge globale, pas de phase par objet) — change
+   de frame chaque seconde. Dupliqué du jeu (render.js) : contexte canvas
+   distinct (`ctx`), horloge de mode test (`playNow`) au lieu de `now`. En
+   mode édition (pas de partie en cours), on utilise Date.now() à la place. */
+function plantFrameIndex(){
+  const t = (typeof playRunning!=="undefined" && playRunning) ? playNow : Date.now();
+  return Math.floor(t/1000) % PLANT_SPRITES.length;
+}
+function drawPlantRow(x,y,w,h){
+  const img = PLANT_SPRITES[plantFrameIndex()];
+  const n = Math.max(1, Math.round(w/GRID));
+  if(!img || !img.complete || !img.naturalWidth){
+    ctx.fillStyle = "#e0455c";
+    const cw = w/n;
+    for(let i=0;i<n;i++){
+      const sx = x + i*cw;
+      ctx.beginPath();
+      ctx.moveTo(sx, y+h); ctx.lineTo(sx+cw/2, y); ctx.lineTo(sx+cw, y+h);
+      ctx.closePath(); ctx.fill();
+    }
+    return;
+  }
+  ctx.imageSmoothingEnabled = false;
+  const scale = GRID/img.naturalWidth;
+  const dw = GRID, dh = img.naturalHeight*scale;
+  for(let i=0;i<n;i++){
+    const cx = x + i*GRID + GRID/2;
+    ctx.drawImage(img, cx-dw/2, y+h-dh, dw, dh);
+  }
+}
+
+/* Sortie (tube), avec repli vers l'ancienne porte tant que l'image ne
+   charge pas. */
+function drawExitSprite(x,y,w,h,curPlayMode){
+  if(SPRITE_TUBE.complete && SPRITE_TUBE.naturalWidth>0){
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(SPRITE_TUBE, x, y, w, h);
+    ctx.restore();
+  } else {
+    drawDoorShape(x,y,w,h, curPlayMode==="won"?"#2fb380":"#3a9c6c", "#eafff3", "#164a33");
+  }
+}
+
+/* Nuages du mode test — même logique que le jeu (render.js) : 2-3 nuages
+   parmi 3 tailles, dérive lente homogène, réinitialisés à chaque partie
+   test. Pas de nuages en mode édition (canevas de travail, pas d'aperçu
+   animé pour ne pas distraire). */
+let clouds = [];
+let cloudDriftDir = 1;
+function initClouds(){
+  const count = 2 + Math.floor(Math.random()*2);
+  cloudDriftDir = Math.random()<0.5 ? -1 : 1;
+  clouds = [];
+  for(let i=0;i<count;i++){
+    clouds.push({ spriteIdx: Math.floor(Math.random()*CLOUD_SPRITES.length), x: Math.random()*W, y: 14+Math.random()*70 });
+  }
+}
+const CLOUD_SPEED = 6;
+function updatePlayClouds(dt){
+  for(const c of clouds){
+    c.x += cloudDriftDir*CLOUD_SPEED*dt;
+    if(c.x>W+90) c.x=-90;
+    if(c.x<-90) c.x=W+90;
+  }
+}
+function drawClouds(){
+  for(const c of clouds){
+    const img = CLOUD_SPRITES[c.spriteIdx];
+    if(!img || !img.complete || !img.naturalWidth) continue;
+    ctx.drawImage(img, c.x, c.y, img.naturalWidth, img.naturalHeight);
+  }
 }
 
 function drawGrid(){
@@ -1137,6 +1233,7 @@ function playBuildLevel(){
     prevGroundedOn:null, justLandedOn:null, justJumped:false, lastBump:null, lastGroundY:null, moveX:null, moveY:null, facing:1 };
   playTimers=[]; playNow=0; playMode="playing"; playLastCause=null; walkPhase=0; playPrevBox=null;
   currentGravity = lvl.gravity!=null ? lvl.gravity : DEFAULT_GRAVITY;
+  initClouds();
   hidePlayMsg();
 }
 /* Boîte de collision effective d'un objet : pour un objet qui tourne, on
@@ -1218,10 +1315,47 @@ function playResolve(dt){
     }
   }
   if(P.x<0) P.x=0; if(P.x+P.w>W) P.x=W-P.w;
+
+  /* Sortie (tube) : solide sur les côtés — bloque comme un mur — mais son
+     dessus (l'ouverture, dans le sens opposé à la gravité) fait gagner dès
+     que le joueur y entre en tombant/sautant dedans. Même logique fallSign
+     que le reste de la fonction, même mécanique que le vrai jeu (engine.js). */
+  playResolveExit(fallSign, prevBottom, prevTop);
+}
+function playResolveExit(fallSign, prevBottom, prevTop){
+  const e = curLevel().exit;
+  if(!playOverlap(P, e)) return;
+
+  if(fallSign > 0){
+    if(P.vy >= 0 && prevBottom <= e.y + 10){ playWin(); return; }
+  } else {
+    if(P.vy <= 0 && prevTop >= e.y + e.h - 10){ playWin(); return; }
+  }
+
+  const overlapX = Math.min(P.x+P.w, e.x+e.w) - Math.max(P.x, e.x);
+  const overlapY = Math.min(P.y+P.h, e.y+e.h) - Math.max(P.y, e.y);
+  if(overlapX < overlapY){
+    if(P.x < e.x) P.x -= overlapX; else P.x += overlapX;
+    P.vx = 0;
+  } else {
+    if(fallSign > 0){
+      if(P.y < e.y){ playWin(); return; }
+      else { P.y += overlapY; P.vy = 0; }
+    } else {
+      if(P.y + P.h > e.y + e.h){ playWin(); return; }
+      else { P.y -= overlapY; P.vy = 0; }
+    }
+  }
+}
+function playWin(){
+  playMode="won";
+  showPlayMsg("⭐ Niveau terminé ! Relance automatique dans 2 secondes…");
+  setTimeout(()=>{ if(playRunning) playBuildLevel(); }, 2000);
 }
 let playPrevBox = null;
 function playUpdate(dt){
   playNow += dt*1000; playProcessTimers();
+  updatePlayClouds(dt);
   playPrevBox = { x:P.x, y:P.y, w:P.w, h:P.h };
 
   /* Objets animés, avant la résolution des collisions (le joueur se tient
@@ -1256,6 +1390,7 @@ function playUpdate(dt){
   P.vx = ((playInput.right?1:0)-(playInput.left?1:0)) * MOVE_SPEED;
   if(P.vx>0) P.facing=1; else if(P.vx<0) P.facing=-1;
   walkPhase += Math.abs(P.vx)*dt*0.15;
+  if(Math.abs(P.vx) < 1) walkPhase = 0;
   P.justJumped=false;
   if(playInput.jumpQueued && P.grounded){
     /* Le saut pousse toujours à l'OPPOSÉ du sens de la gravité actuelle :
@@ -1308,13 +1443,6 @@ function playUpdate(dt){
     if(o.triggered) continue;
     if(playCheckTrigger(o)){ o.triggered=true; playApplyAction(o, playObjectsById[o.id].trap.action); }
   }
-  const lvl = curLevel();
-  if(playOverlap(P, lvl.exit)){
-    playMode="won";
-    showPlayMsg("⭐ Niveau terminé ! Relance automatique dans 2 secondes…");
-    setTimeout(()=>{ if(playRunning) playBuildLevel(); }, 2000);
-    return;
-  }
   if(P.y>H+60){ playDeath(null); return; }
   for(const o of playObjects){ if(o.hazard && o.visible!==false && playOverlap(P,o)){ playDeath(o); return; } }
 }
@@ -1337,19 +1465,17 @@ function drawPlayObject(o){
   }
   if(invisible) ctx.globalAlpha = 0.4;
   switch(o.kind){
-    case "static": case "decoy": drawBrick(o.x,o.y,o.w,o.h); break;
+    case "static": case "decoy": drawBlockTile(o.x,o.y,o.w,o.h); break;
     case "falling":
-      drawBrick(o.x,o.y,o.w,o.h);
+      drawBlockTile(o.x,o.y,o.w,o.h);
       if(o.state==="shaking"||o.state==="falling"){ ctx.strokeStyle="rgba(40,20,10,.55)"; ctx.lineWidth=1.5;
         ctx.beginPath(); ctx.moveTo(o.x+o.w*0.32,o.y+2); ctx.lineTo(o.x+o.w*0.45,o.y+o.h*0.6); ctx.lineTo(o.x+o.w*0.38,o.y+o.h-2); ctx.stroke(); }
       break;
-    case "gate": drawStoneBrick(o.x,o.y,o.w,o.h); break;
-    case "blocker": drawBrick(o.x,o.y,o.w,o.h); ctx.strokeStyle="rgba(224,69,92,.55)"; ctx.lineWidth=2; ctx.strokeRect(o.x+1,o.y+1,o.w-2,o.h-2); break;
+    case "gate": drawBlockTile(o.x,o.y,o.w,o.h); break;
+    case "blocker": drawBlockTile(o.x,o.y,o.w,o.h); ctx.strokeStyle="rgba(224,69,92,.55)"; ctx.lineWidth=2; ctx.strokeRect(o.x+1,o.y+1,o.w-2,o.h-2); break;
     case "hidden_spike":
-      if(o.hazard){ ctx.fillStyle="#e0455c"; for(let i=0;i<3;i++){ const sx=o.x+i*(o.w/3);
-        ctx.beginPath(); ctx.moveTo(sx,o.y+o.h); ctx.lineTo(sx+o.w/6,o.y); ctx.lineTo(sx+o.w/3,o.y+o.h); ctx.closePath(); ctx.fill(); } }
-      else if(invisible){ ctx.fillStyle="rgba(224,69,92,.35)"; for(let i=0;i<3;i++){ const sx=o.x+i*(o.w/3);
-        ctx.beginPath(); ctx.moveTo(sx,o.y+o.h); ctx.lineTo(sx+o.w/6,o.y); ctx.lineTo(sx+o.w/3,o.y+o.h); ctx.closePath(); ctx.fill(); } }
+      if(o.hazard){ drawPlantRow(o.x,o.y,o.w,o.h); }
+      else if(invisible){ ctx.save(); ctx.globalAlpha=0.35; drawPlantRow(o.x,o.y,o.w,o.h); ctx.restore(); }
       break;
     case "door":
       drawDoorShape(o.x,o.y,o.w,o.h, "#3d5af1", "#eef0ff", "#1f2d8a");
@@ -1422,7 +1548,12 @@ function computePlayArea(){
   const x0 = left ? left.x+left.w : 0;
   const y0 = top ? top.y+top.h : 0;
   const x1 = right ? right.x : W;
-  return { x:x0, y:y0, w:Math.max(1,x1-x0), h:Math.max(1,H-y0) };
+  /* Pas de mur de bordure en bas (par design) — bande noire du bas purement
+     visuelle, calée sur l'épaisseur réelle du mur du haut pour rester
+     cohérente avec les trois autres côtés quel que soit le niveau. */
+  const bottomMargin = top ? top.h : (left ? left.w : 20);
+  const y1 = H - bottomMargin;
+  return { x:x0, y:y0, w:Math.max(1,x1-x0), h:Math.max(1,y1-y0) };
 }
 function renderPlay(){
   ctx.save();
@@ -1435,14 +1566,46 @@ function renderPlay(){
   ctx.setTransform(s,0,0,s, ox, oy);
   ctx.beginPath(); ctx.rect(area.x, area.y, area.w, area.h); ctx.clip();
 
-  const grad = ctx.createLinearGradient(0,0,0,H); grad.addColorStop(0,"#eef1fb"); grad.addColorStop(1,"#e2e6f6");
-  ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = SKY_COLOR;
+  ctx.fillRect(0,0,W,H);
+  drawClouds();
   const lvl = curLevel(); const ex = lvl.exit;
-  drawDoorShape(ex.x,ex.y,ex.w,ex.h, playMode==="won"?"#2fb380":"#3a9c6c", "#eafff3", "#164a33");
+  drawExitSprite(ex.x,ex.y,ex.w,ex.h, playMode);
   for(const o of playObjects) drawPlayObject(o);
-  ctx.save(); ctx.translate(P.x+P.w/2, P.y+P.h/2); ctx.scale(P.facing, currentGravity<0 ? -1 : 1);
-  drawStickFigure(P.w, P.h, P.grounded, walkPhase, playMode==="dead", Math.min(1, Math.abs(P.vx)/80));
+  drawPlayMario();
   ctx.restore();
+}
+/* Sprite Mario si l'image est chargée, sinon repli sur la silhouette
+   bonhomme-bâton — même logique que render.js (dupliquée : contexte canvas
+   distinct `ctx`, variables `P`/`playMode` au lieu de `player`/`mode`). */
+function drawPlayMario(){
+  const facingRight = P.facing >= 0;
+  let img;
+  if(!P.grounded){
+    img = facingRight ? MARIO_SPRITES.jumpR : MARIO_SPRITES.jumpL;
+  } else if(Math.abs(P.vx) > 5){
+    const set = facingRight ? MARIO_SPRITES.walkR : MARIO_SPRITES.walkL;
+    img = set[Math.floor(walkPhase*0.6) % set.length];
+  } else {
+    img = facingRight ? MARIO_SPRITES.idleR : MARIO_SPRITES.idleL;
+  }
+
+  if(!img || !img.complete || !img.naturalWidth){
+    ctx.save();
+    ctx.translate(P.x+P.w/2, P.y+P.h/2); ctx.scale(P.facing, currentGravity<0 ? -1 : 1);
+    drawStickFigure(P.w, P.h, P.grounded, walkPhase, playMode==="dead", Math.min(1, Math.abs(P.vx)/80));
+    ctx.restore();
+    return;
+  }
+
+  const scale = P.h / img.naturalHeight;
+  const dw = img.naturalWidth*scale, dh = img.naturalHeight*scale;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  if(playMode==="dead") ctx.globalAlpha = 0.55;
+  ctx.translate(P.x+P.w/2, P.y+P.h/2);
+  if(currentGravity<0) ctx.scale(1,-1);
+  ctx.drawImage(img, -dw/2, P.h/2-dh, dw, dh);
   ctx.restore();
 }
 let playLastTs=null;
