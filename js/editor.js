@@ -94,7 +94,7 @@ function randomLevelId(){
 }
 function makeEmptyLevel(id, name){
   return {
-    id: id || randomLevelId(), name, difficulty:1, gravity:DEFAULT_GRAVITY, playerStart:{x:40,y:372}, exit:{x:720,y:360,w:40,h:60},
+    id: id || randomLevelId(), name, difficulty:1, gravity:DEFAULT_GRAVITY, playerStart:{x:40,y:372}, exit:{x:720,y:380,w:40,h:40},
     /* Closed off at the top/left/right by default: the only way to "leave"
        is by falling (death) or reaching the exit — never through a
        screen edge. These are objects like any other: movable/deletable if
@@ -244,8 +244,9 @@ function drawObjectEditor(o, isSelected){
       if(BUMP_SPRITES[0].complete && BUMP_SPRITES[0].naturalWidth){
         const img = BUMP_SPRITES[0];
         ctx.imageSmoothingEnabled = false;
-        const scale = o.w/img.naturalWidth, dw=o.w, dh=img.naturalHeight*scale;
-        ctx.drawImage(img, o.x, o.y+o.h-dh, dw, dh);
+        const scale = GRID/img.naturalWidth, dw=GRID, dh=img.naturalHeight*scale;
+        const cx = o.x + o.w/2;
+        ctx.drawImage(img, cx-dw/2, o.y+o.h-dh, dw, dh);
       } else {
         drawStoneBrick(o.x,o.y,o.w,o.h);
         { const cx=o.x+o.w/2, cy=o.y+o.h/2, r=Math.min(o.w,o.h)*0.28;
@@ -428,8 +429,9 @@ function drawButtonSpriteEd(o){
     return;
   }
   ctx.imageSmoothingEnabled = false;
-  const scale = o.w/img.naturalWidth, dw=o.w, dh=img.naturalHeight*scale;
-  ctx.drawImage(img, o.x, o.y+o.h-dh, dw, dh);
+  const scale = GRID/img.naturalWidth, dw=GRID, dh=img.naturalHeight*scale;
+  const cx = o.x + o.w/2;
+  ctx.drawImage(img, cx-dw/2, o.y+o.h-dh, dw, dh);
 }
 function playerButtonSinkOffset(){
   let maxPhase = 0;
@@ -655,7 +657,10 @@ canvas.addEventListener("pointermove", (evt)=>{
   } else if(drag.type==="resize"){
     const o = curLevel().objects.find(x=>x.id===drag.id);
     o.w = Math.max(GRID, snap(drag.startW + (pt.x-drag.startX)));
-    o.h = Math.max(GRID, snap(drag.startH + (pt.y-drag.startY)));
+    /* Le bouton a une hauteur fixe (calée sur la taille naturelle du
+       sprite bump.png) : sa hauteur ne se redimensionne jamais depuis la
+       poignée, seule sa largeur (le nombre de cases) change. */
+    o.h = o.kind==="button" ? GRID : Math.max(GRID, snap(drag.startH + (pt.y-drag.startY)));
     renderInspector(); render();
   } else if(drag.type==="moveExit"){
     const e = curLevel().exit;
@@ -1323,15 +1328,18 @@ function applySceneAction(action){
     controlsInverted = (action.value==="inverted");
   }
 }
+const PLAYER_BASE_W = 26, PLAYER_BASE_H = 38;
 function applyPlayerAction(action){
   if(action.type==="CHANGE_WIDTH"){
-    const newW = action.value!=null ? action.value : 26;
-    P.x += (P.w-newW)/2; // recenters horizontally to avoid a sudden jump
-    P.w = newW;
+    const newW = action.value!=null ? action.value : PLAYER_BASE_W;
+    const newH = newW * (PLAYER_BASE_H/PLAYER_BASE_W);
+    P.x += (P.w-newW)/2; P.y += (P.h-newH);
+    P.w = newW; P.h = newH;
   } else if(action.type==="CHANGE_HEIGHT"){
-    const newH = action.value!=null ? action.value : 38;
-    P.y += (P.h-newH); // keeps the feet in the same place (anchored at the bottom)
-    P.h = newH;
+    const newH = action.value!=null ? action.value : PLAYER_BASE_H;
+    const newW = newH * (PLAYER_BASE_W/PLAYER_BASE_H);
+    P.y += (P.h-newH); P.x += (P.w-newW)/2;
+    P.w = newW; P.h = newH;
   } else if(action.type==="MOVE"){
     const speed = action.speed!=null?action.speed:100;
     const dir = action.direction||"right";
@@ -1381,13 +1389,14 @@ function playCheckTrigger(obj){
   switch(t.type){
     case "ON_LAND": return P.justLandedOn===obj.id;
     case "ON_ENTER": {
-      if(!playOverlap(P, obj)) return false;
+      const box = effectiveBox(obj);
+      if(!playOverlap(P, box)) return false;
       if(!t.fromSide) return true;
-      if(playPrevBox && playOverlap(playPrevBox, obj)) return false; // already inside, not an "entry"
-      const sides = playPrevBox ? enteredFromSides(playPrevBox, P, obj) : [];
+      if(playPrevBox && playOverlap(playPrevBox, box)) return false; // already inside, not an "entry"
+      const sides = playPrevBox ? enteredFromSides(playPrevBox, P, box) : [];
       return sides.includes(t.fromSide);
     }
-    case "ON_JUMP": return P.justJumped && playOverlap(P, obj);
+    case "ON_JUMP": return P.justJumped && playOverlap(P, effectiveBox(obj));
     case "ON_TIMER": return playNow >= (t.delay||0);
     case "ON_ATTEMPT": return playAttempts >= (t.count||1);
     default: return false;
@@ -1638,7 +1647,7 @@ function playUpdate(dt){
     if(playCheckTrigger(o)){ o.triggered=true; playApplyAction(o, playObjectsById[o.id].trap.action); }
   }
   if(P.y>H+60){ playDeath(null); return; }
-  for(const o of playObjects){ if(o.hazard && o.visible!==false && playOverlap(P,o)){ playDeath(o); return; } }
+  for(const o of playObjects){ if(o.hazard && o.visible!==false && playOverlap(P,effectiveBox(o))){ playDeath(o); return; } }
 }
 function playDeath(obj){
   playMode="dead"; playAttempts++;
@@ -1778,7 +1787,7 @@ function drawPlayMario(){
   let img;
   if(!P.grounded){
     img = facingRight ? MARIO_SPRITES.jumpR : MARIO_SPRITES.jumpL;
-  } else if(Math.abs(P.vx) > 5){
+  } else if(playInput.left || playInput.right){
     const set = facingRight ? MARIO_SPRITES.walkR : MARIO_SPRITES.walkL;
     img = set[Math.floor(walkPhase*0.6) % set.length];
   } else {
