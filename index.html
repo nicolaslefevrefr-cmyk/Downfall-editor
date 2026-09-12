@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<title>Éditeur de niveaux — Chute Libre</title>
+<title>Level Editor — Free Fall</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -17,51 +17,50 @@
       <button id="btnTogglePalette" class="tbtn drawerToggle">📦</button>
     </div>
     <div class="tgroup">
-      <button id="btnImport" class="tbtn">Importer JSON</button>
+      <button id="btnImport" class="tbtn">Import JSON</button>
       <input id="fileImport" type="file" accept="application/json" hidden>
-      <button id="btnExport" class="tbtn">Exporter JSON</button>
-      <button id="btnResetLevel" class="tbtn danger">↺ Tout réinitialiser</button>
+      <button id="btnExport" class="tbtn">Export JSON</button>
+      <button id="btnResetLevel" class="tbtn danger">↺ Reset everything</button>
       <button id="btnFirebase" class="tbtn">☁ Firebase</button>
-      <label class="tcheck"><input id="chkGrid" type="checkbox" checked> Grille</label>
+      <label class="tcheck"><input id="chkGrid" type="checkbox" checked> Grid</label>
     </div>
     <div class="tgroup">
-      <button id="btnDuplicate" class="tbtn" disabled>⧉ Dupliquer</button>
-      <button id="btnDelete" class="tbtn danger" disabled>🗑 Supprimer</button>
-      <button id="btnPlay" class="tbtn primary">▶ Tester le niveau</button>
-      <button id="installBtn" class="tbtn" style="display:none;">⬇ Installer</button>
-      <button id="btnToggleInspector" class="tbtn" title="Propriétés">⚙️</button>
+      <button id="btnDuplicate" class="tbtn" disabled>⧉ Duplicate</button>
+      <button id="btnDelete" class="tbtn danger" disabled>🗑 Delete</button>
+      <button id="btnPlay" class="tbtn primary">▶ Test level</button>
+      <button id="installBtn" class="tbtn" style="display:none;">⬇ Install</button>
+      <button id="btnToggleInspector" class="tbtn" title="Properties">⚙️</button>
     </div>
   </header>
 
   <div id="workspace">
     <aside id="palette">
-      <h3>Bibliothèque d'objets</h3>
+      <h3>Object library</h3>
       <div id="paletteList"></div>
-      <h3>Niveau</h3>
+      <h3>Level</h3>
       <div id="levelMeta"></div>
     </aside>
 
     <main id="canvasArea">
       <div id="canvasWrap">
         <canvas id="editorCanvas"></canvas>
-        <div id="playOverlayMsg"></div>
-        <label id="showHiddenToggle" class="tcheck"><input id="chkShowHidden" type="checkbox"> Tout voir (éléments cachés)</label>
+        <label id="showHiddenToggle" class="tcheck"><input id="chkShowHidden" type="checkbox"> Show all (hidden items)</label>
         <div id="zoomBar">
           <button id="btnZoomOut" class="tbtn">−</button>
           <span id="zoomLabel">100%</span>
           <button id="btnZoomIn" class="tbtn">+</button>
-          <button id="btnZoomReset" class="tbtn" title="Ajuster à l'écran">⤢</button>
-          <button id="btnPanMode" class="tbtn" title="Déplacer la vue (glisser)">🖐</button>
+          <button id="btnZoomReset" class="tbtn" title="Fit to screen">⤢</button>
+          <button id="btnPanMode" class="tbtn" title="Pan view (drag)">🖐</button>
         </div>
       </div>
     </main>
 
     <aside id="inspector">
       <div class="inspectorHeader">
-        <h3>Propriétés</h3>
+        <h3>Properties</h3>
         <button id="btnCloseInspector" class="tbtn">✕</button>
       </div>
-      <div id="inspectorBody"><p class="empty">Rien n'est sélectionné. Clique un objet sur la scène, ou choisis un élément dans la bibliothèque pour en poser un nouveau.</p></div>
+      <div id="inspectorBody"><p class="empty">Nothing selected. Click an object on the stage, or pick an item from the library to place a new one.</p></div>
     </aside>
   </div>
 
@@ -77,25 +76,35 @@
 <div id="fbBackdrop" class="modalBackdrop"></div>
 <div id="fbModal" class="modal">
   <div class="modalHeader">
-    <h3 style="margin:0;font-size:14px;">☁ Firebase</h3>
+    <div class="modalTabs">
+      <button id="fbTabLoadSave" class="modalTab active" type="button">Load / Save</button>
+      <button id="fbTabManage" class="modalTab" type="button">Organize</button>
+    </div>
     <button id="fbModalClose" class="tbtn">✕</button>
   </div>
 
   <div id="fbPanelLoadSave" class="modalPanel">
-    <h4>Sauvegarder le niveau actuel</h4>
+    <h4>Save current level</h4>
     <div class="field">
-      <label>Statut</label>
+      <label>Status</label>
       <select id="fbStatusSelect">
-        <option value="PRODUCTION">PRODUCTION — pas encore proposé dans le jeu</option>
-        <option value="FINAL">FINAL — jouable dans le jeu</option>
+        <option value="PRODUCTION">PRODUCTION — not yet available in-game</option>
+        <option value="FINAL">FINAL — playable in-game</option>
       </select>
     </div>
-    <button id="fbSaveBtn" class="tbtn primary" style="width:100%;">☁ Sauvegarder sur Firebase</button>
+    <button id="fbSaveBtn" class="tbtn primary" style="width:100%;">☁ Save to Firebase</button>
     <div id="fbSaveStatus" class="fbStatusMsg"></div>
 
-    <h4>Niveaux sur Firebase</h4>
-    <button id="fbRefreshBtn" class="tbtn" style="width:100%;">↻ Actualiser la liste</button>
+    <h4>Levels on Firebase</h4>
+    <button id="fbRefreshBtn" class="tbtn" style="width:100%;">↻ Refresh list</button>
     <div id="fbLevelList"></div>
+  </div>
+
+  <div id="fbPanelManage" class="modalPanel" style="display:none;">
+    <p class="hint">Edit the order (used to sequence levels in-game), rename, or delete levels stored on Firebase. Changes are applied when you click "Save changes" on each row.</p>
+    <button id="fbManageRefresh" class="tbtn" style="width:100%;">↻ Refresh list</button>
+    <div id="fbManageList"></div>
+    <div id="fbManageStatus" class="fbStatusMsg"></div>
   </div>
 </div>
 
@@ -106,8 +115,8 @@
 <script>
 if("serviceWorker" in navigator){
   window.addEventListener("load", () => { navigator.serviceWorker.register("service-worker.js").catch(()=>{}); });
-  /* Dès qu'une nouvelle version du service worker prend le relais (après
-     un déploiement), on recharge une fois automatiquement. */
+  /* As soon as a new service worker version takes over (after a
+     deployment), the page reloads once automatically. */
   let __swRefreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if(__swRefreshing) return;

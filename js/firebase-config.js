@@ -1,23 +1,20 @@
 "use strict";
 /* =========================================================================
-   Configuration Firebase — À REMPLIR UNE FOIS avant de pousser sur GitHub.
+   Firebase configuration — FILL IN ONCE before pushing to GitHub.
 
-   Utilise ici la Realtime Database de Firebase, via son API REST (pas
-   besoin du SDK complet) : de simples requêtes fetch() vers ton
-   databaseURL suffisent pour lire/écrire des niveaux en JSON.
+   Uses Firebase's Realtime Database here, via its REST API (no need
+   for the full SDK): simple fetch() requests to your
+   databaseURL are enough to read/write levels as JSON.
 
-   - databaseURL : l'URL de ta Realtime Database, du genre
-     "https://TON-PROJET-default-rtdb.firebaseio.com" (sans slash final).
-   - authToken : optionnel. Laisse vide si tes règles de sécurité
-     autorisent la lecture/écriture publique (pratique pour tester, mais à
-     verrouiller avant une mise en production réelle). Sinon, mets ici un
-     secret de base de données ou un jeton d'authentification Firebase.
+   - databaseURL: the URL of your Realtime Database, something like
+     "https://YOUR-PROJECT-default-rtdb.firebaseio.com" (no trailing slash).
+   - authToken: optional. Leave empty if your security rules
+     allow public read/write (handy for testing, but should be
+     locked down before a real production deployment). Otherwise, put a
+     database secret or a Firebase auth token here.
 
-   Ces valeurs ne sont que les valeurs PAR DÉFAUT : l'utilisateur peut les
-   remplacer à tout moment depuis l'onglet "Paramètres" de la fenêtre
-   Firebase (☁), et sa saisie est alors mémorisée dans le navigateur
-   (localStorage) — pratique pour tester avec un autre projet sans modifier
-   ce fichier. Ce fichier reste la config "de base" livrée avec le site. */
+   These are the only values used — there is no in-app settings screen to
+   override them; edit this file directly and redeploy to change them. */
 const FIREBASE_CONFIG = {
   databaseURL: "https://downfall-e1bec-default-rtdb.firebaseio.com",
   authToken: "",

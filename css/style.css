@@ -32,8 +32,8 @@ select, input[type=text], input[type=number]{
 }
 .tcheck{ display:flex; align-items:center; gap:5px; font-size:13px; color:var(--muted); }
 
-/* workspace : palette | canvas | inspector (l'inspecteur est TOUJOURS un
-   panneau flottant qui s'ouvre à la sélection, pas une colonne statique). */
+/* workspace: palette | canvas | inspector (the inspector is ALWAYS a
+   floating panel that opens on selection, not a static column). */
 #workspace{ flex:1; display:flex; min-height:0; position:relative; }
 
 #palette{
@@ -121,11 +121,6 @@ canvas{ display:block; width:100%; height:100%; touch-action:none; }
 .ctrl:active{ background:#dde1f7; }
 .dpad{ display:flex; gap:14px; }
 .ctrlJump{ background:var(--accent); color:#fff; }
-#playOverlayMsg{
-  position:absolute; left:50%; top:14px; transform:translateX(-50%); background:rgba(20,22,36,.75); color:#fff;
-  padding:8px 16px; border-radius:10px; font-size:13px; display:none; max-width:80%; text-align:center;
-}
-#playOverlayMsg.show{ display:block; }
 #showHiddenToggle{
   display:none; position:absolute; right:12px; top:12px; background:rgba(255,255,255,.92);
   padding:6px 10px; border-radius:8px; box-shadow:var(--shadow); font-size:12px; color:var(--text);
@@ -179,3 +174,17 @@ canvas{ display:block; width:100%; height:100%; touch-action:none; }
 }
 .fbBadge.FINAL{ background:#e3f7ee; color:#1d7a54; }
 .fbBadge.PRODUCTION{ background:#fdf1dc; color:#946213; }
+
+.fbManageRow{
+  border:1px solid var(--border); border-radius:10px; margin-top:8px; padding:9px 10px;
+}
+.fbManageRow .fbManageTop{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.fbManageRow .fbManageId{ font-size:10.5px; color:var(--muted); flex:1; }
+.fbManageRow .fbOrderInput{
+  width:52px; border:1px solid var(--border); border-radius:8px; padding:5px 6px; font-size:12.5px; text-align:center;
+}
+.fbManageRow .fbNameInput{
+  flex:1; border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:13px;
+}
+.fbManageRow .fbManageActions{ display:flex; gap:6px; margin-top:6px; }
+.fbManageRow .fbManageActions .tbtn{ flex:1; font-size:12px; padding:6px 8px; }

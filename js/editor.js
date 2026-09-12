@@ -1,76 +1,82 @@
 "use strict";
 /* =========================================================================
-   ÉDITEUR DE NIVEAUX — Chute Libre
-   Modèle de données identique à celui consommé par le jeu (LEVELS_SOURCE) :
-   un niveau = { id, name, difficulty, playerStart, exit, objects:[...] }.
-   Chaque objet peut porter un `trap` { trigger, action, then[] }. L'éditeur
-   permet de poser, déplacer, redimensionner, paramétrer et relier ces
-   objets, puis d'exporter le tout en JSON directement rejouable.
-   Le mode "Tester" réutilise le même moteur physique/triggers que le jeu
-   (copié depuis js/engine.js) pour un aller-retour édition/test immédiat.
+   LEVEL EDITOR — Free Fall
+   Data model identical to the one the game consumes (LEVELS_SOURCE):
+   a level = { id, name, difficulty, playerStart, exit, objects:[...] }.
+   Each object can carry a `trap` { trigger, action, then[] }. The editor
+   lets you place, move, resize, configure, and link these
+   objects, then export the whole thing as directly-playable JSON.
+   "Test" mode reuses the same physics/trigger engine as the game
+   (copied from js/engine.js) for an immediate edit/test round-trip.
    ========================================================================= */
 
 const W = 800, H = 450;
-const DEFAULT_GRAVITY = 2200;
-const MOVE_SPEED = 240, JUMP_VELOCITY = -620, MAX_FALL = 900, STEP_UP = 14;
+const DEFAULT_GRAVITY = 3000;
+const DEFAULT_MOVE_SPEED = 240;
+const JUMP_VELOCITY = -620, MAX_FALL = 900, STEP_UP = 14;
+let currentMoveSpeed = DEFAULT_MOVE_SPEED;
+let controlsInverted = false;
 let currentGravity = DEFAULT_GRAVITY;
 const GRID = 20;
 
-/* ---------------------------- Bibliothèque d'objets (palette) ----------------------------
-   Volontairement réduite à un petit socle générique et composable : tout le
-   reste (plateforme qui tombe, porte, porte verrouillée, plafond surgissant,
-   décor) se reconstruit à partir de "Sol / plateforme" + trigger/action/lien
-   — c'est plus flexible qu'un catalogue figé de blocs spécialisés, et c'est
-   la logique "kit" du jeu. Les anciens exports JSON contenant ces kinds
-   (falling, door, gate, blocker, decoy) restent affichés correctement si
-   réimportés : seul le rendu générique est conservé, seule la palette est
-   réduite. */
+/* ---------------------------- Object library (palette) ----------------------------
+   Deliberately reduced to a small, generic, composable base: everything
+   else (falling platform, door, locked gate, popping ceiling, decor)
+   is rebuilt from "Floor / platform" + trigger/action/link
+   — this is more flexible than a fixed catalog of specialized blocks, and
+   it's the game's "kit" logic. Older JSON exports containing these kinds
+   (falling, door, gate, blocker, decoy) still display correctly if
+   re-imported: only the generic rendering is kept, only the palette is
+   reduced. */
 const KIND_LIB = [
-  { kind:"static", label:"Sol / plateforme / mur", color:"#a1382a", w:120, h:40,
+  { kind:"static", label:"Floor / platform / wall", color:"#a1382a", w:120, h:40,
     defaults:{ solid:true, trap:{ trigger:{type:"ON_ENTER"}, action:{type:"NONE"} } } },
-  { kind:"hidden_spike", label:"Pic caché", color:"#e0455c", w:20, h:20,
-    defaults:{ solid:false, hazard:true, visible:false, description:"Un pic caché se révèle quand on approche.",
+  { kind:"hidden_spike", label:"Hidden spike", color:"#e0455c", w:20, h:20,
+    defaults:{ solid:false, hazard:true, visible:false, description:"A hidden spike reveals itself when approached.",
       trap:{ trigger:{type:"ON_ENTER"}, action:{type:"REVEAL", delay:150} } } },
-  { kind:"button", label:"Bouton", color:"#8a6a3a", w:60, h:20,
-    defaults:{ solid:false, description:"Un bouton qui déclenche quelque chose ailleurs.",
+  { kind:"button", label:"Button", color:"#8a6a3a", w:60, h:20,
+    defaults:{ solid:false, description:"A button that triggers something elsewhere.",
       trap:{ trigger:{type:"ON_ENTER"}, action:{type:"ACTIVATE"} } } },
-  { kind:"sensor", label:"Déclencheur (zone invisible)", color:"#3d5af1", w:40, h:40,
+  { kind:"sensor", label:"Trigger (invisible zone)", color:"#3d5af1", w:40, h:40,
     defaults:{ solid:false, visible:false,
       trap:{ trigger:{type:"ON_ENTER"}, action:{type:"NONE"} } } },
 ];
 function kindMeta(kind){ return KIND_LIB.find(k=>k.kind===kind) || KIND_LIB[0]; }
 
 const TRIGGER_TYPES = [
-  { type:"NONE", label:"Aucun" },
-  { type:"ON_LAND", label:"À l'atterrissage (ON_LAND)" },
-  { type:"ON_ENTER", label:"En entrant dans la zone (ON_ENTER)" },
-  { type:"ON_JUMP", label:"Au moment du saut (ON_JUMP)" },
-  { type:"ON_TIMER", label:"Après un délai depuis le début (ON_TIMER)" },
-  { type:"ON_ATTEMPT", label:"À partir de la N-ième tentative (ON_ATTEMPT)" },
+  { type:"NONE", label:"None" },
+  { type:"ON_LAND", label:"On landing (ON_LAND)" },
+  { type:"ON_ENTER", label:"On entering the zone (ON_ENTER)" },
+  { type:"ON_JUMP", label:"On jumping (ON_JUMP)" },
+  { type:"ON_TIMER", label:"After a delay from the start (ON_TIMER)" },
+  { type:"ON_ATTEMPT", label:"From the Nth attempt onward (ON_ATTEMPT)" },
 ];
 const ACTION_TYPES = [
-  { type:"NONE", label:"Aucune" },
-  { type:"FALL", label:"Trembler puis tomber (FALL)" },
-  { type:"DISAPPEAR", label:"Disparaître (DISAPPEAR)" },
-  { type:"REVEAL", label:"Se révéler (REVEAL)" },
-  { type:"OPEN", label:"S'ouvrir / devenir traversable (OPEN)" },
-  { type:"ACTIVATE", label:"S'activer (cosmétique) (ACTIVATE)" },
-  { type:"APPEAR_TEMP", label:"Surgir puis se rétracter (APPEAR_TEMP)" },
-  { type:"DISABLE", label:"Désactiver silencieusement la cible (DISABLE)" },
-  { type:"MOVE", label:"Translation à vitesse constante (MOVE)" },
-  { type:"ROTATE", label:"Rotation continue (ROTATE)" },
+  { type:"NONE", label:"None" },
+  { type:"FALL", label:"Shake then fall (FALL)" },
+  { type:"DISAPPEAR", label:"Disappear (DISAPPEAR)" },
+  { type:"REVEAL", label:"Reveal itself (REVEAL)" },
+  { type:"OPEN", label:"Open / become passable (OPEN)" },
+  { type:"ACTIVATE", label:"Activate (cosmetic) (ACTIVATE)" },
+  { type:"APPEAR_TEMP", label:"Pop up then retract (APPEAR_TEMP)" },
+  { type:"DISABLE", label:"Silently disable the target (DISABLE)" },
+  { type:"MOVE", label:"Move at constant speed (MOVE)" },
+  { type:"MOVE_TO", label:"Move to a fixed position (MOVE_TO)" },
+  { type:"ROTATE", label:"Continuous rotation (ROTATE)" },
 ];
-/* Actions disponibles sur la cible spéciale SCENE (paramètres globaux du
-   niveau) et sur la cible spéciale PLAYER (le personnage lui-même). */
+/* Actions available on the special SCENE target (global level
+   parameters) and the special PLAYER target (the character itself). */
 const SCENE_ACTION_TYPES = [
-  { type:"NONE", label:"Aucune" },
-  { type:"SET_GRAVITY", label:"Changer la gravité (SET_GRAVITY)" },
+  { type:"NONE", label:"None" },
+  { type:"SET_GRAVITY", label:"Change gravity (SET_GRAVITY)" },
+  { type:"SET_SPEED", label:"Change player speed (SET_SPEED)" },
+  { type:"SET_CONTROLS", label:"Invert controls (SET_CONTROLS)" },
 ];
 const PLAYER_ACTION_TYPES = [
-  { type:"NONE", label:"Aucune" },
-  { type:"MOVE", label:"Impulsion de déplacement (MOVE)" },
-  { type:"CHANGE_WIDTH", label:"Changer la largeur (CHANGE_WIDTH)" },
-  { type:"CHANGE_HEIGHT", label:"Changer la hauteur (CHANGE_HEIGHT)" },
+  { type:"NONE", label:"None" },
+  { type:"MOVE", label:"Movement impulse (MOVE)" },
+  { type:"CHANGE_WIDTH", label:"Change width (CHANGE_WIDTH)" },
+  { type:"CHANGE_HEIGHT", label:"Change height (CHANGE_HEIGHT)" },
 ];
 function actionTypesForTarget(target){
   if(target==="SCENE") return SCENE_ACTION_TYPES;
@@ -78,21 +84,21 @@ function actionTypesForTarget(target){
   return ACTION_TYPES;
 }
 
-/* ---------------------------- Modèle de document ---------------------------- */
-/* Identifiant aléatoire tiré à la création d'un niveau — sert de clé sur
-   Firebase et d'ordre de classement dans le serpentin du jeu (les niveaux
-   sont triés par cet identifiant, pas par leur nom). Purement numérique :
-   toujours une clé valide pour la Realtime Database. */
+/* ---------------------------- Document model ---------------------------- */
+/* Random identifier drawn when a level is created — used as the Firebase
+   key and as the sort order in the game's "snake" map (levels are sorted
+   by this identifier, not by their name). Purely numeric: always a
+   valid Realtime Database key. */
 function randomLevelId(){
   return String(Math.floor(100000000 + Math.random()*900000000));
 }
 function makeEmptyLevel(id, name){
   return {
     id: id || randomLevelId(), name, difficulty:1, gravity:DEFAULT_GRAVITY, playerStart:{x:40,y:372}, exit:{x:720,y:360,w:40,h:60},
-    /* Fermé en haut/gauche/droite par défaut : la seule façon de "sortir"
-       est de tomber (mort) ou d'atteindre la sortie — jamais un bord d'écran.
-       Ce sont des objets comme les autres : déplaçables/supprimables si
-       le niveau en a besoin autrement. */
+    /* Closed off at the top/left/right by default: the only way to "leave"
+       is by falling (death) or reaching the exit — never through a
+       screen edge. These are objects like any other: movable/deletable if
+       the level needs that instead. */
     objects:[
       { id:"_boundTop", kind:"gate", x:0,y:0,w:800,h:20, solid:true },
       { id:"_boundLeft", kind:"gate", x:0,y:0,w:20,h:450, solid:true },
@@ -100,7 +106,7 @@ function makeEmptyLevel(id, name){
     ],
   };
 }
-let level = makeEmptyLevel(null, "Niveau 1");
+let level = makeEmptyLevel(null, "Level 1");
 function curLevel(){ return level; }
 
 let selectedId = null;
@@ -119,19 +125,19 @@ function uniqueId(base){
   while(exists(id)){ n++; id = base+n; }
   return id;
 }
-/* Les murs de bordure (_boundTop/_boundLeft/_boundRight) sont posés par
-   défaut sur chaque niveau et ne doivent jamais pouvoir être supprimés —
-   comme la sortie et le point de départ, ce sont des repères structurels. */
+/* Boundary walls (_boundTop/_boundLeft/_boundRight) are placed by
+   default on every level and must never be deletable — like the
+   exit and the starting point, they're structural landmarks. */
 function isLocked(id){ return typeof id === "string" && id.indexOf("_bound") === 0; }
 function snap(v){ return gridOn ? Math.round(v/GRID)*GRID : Math.round(v); }
 
-/* ---------------------------- Vue (zoom / pan) ---------------------------- */
-/* Le canvas ne dessine plus dans un cadre 800x450 figé : il occupe tout
-   #canvasWrap, et une transformation (zoom + décalage) place le "monde"
-   (toujours 800x450 en coordonnées de niveau) dedans. Toutes les coordonnées
-   souris passent par canvasPoint(), qui applique déjà l'inverse de cette
-   transformation — le reste du code (sélection, drag, placement) continue
-   de raisonner en coordonnées du monde sans rien savoir du zoom. */
+/* ---------------------------- View (zoom / pan) ---------------------------- */
+/* The canvas no longer draws into a fixed 800x450 frame: it fills all of
+   #canvasWrap, and a transform (zoom + offset) places the "world"
+   (still 800x450 in level coordinates) inside it. All mouse coordinates
+   go through canvasPoint(), which already applies the inverse of this
+   transform — the rest of the code (selection, drag, placement) keeps
+   reasoning in world coordinates without knowing anything about zoom. */
 let view = { zoom: 1, offsetX: 0, offsetY: 0 };
 let panModeOn = false;
 let panDrag = null;
@@ -164,7 +170,7 @@ function updateZoomLabel(){
   if(lbl) lbl.textContent = Math.round(view.zoom*100) + "%";
 }
 
-/* ---------------------------- Rendu (réutilise le style brique du jeu) ---------------------------- */
+/* ---------------------------- Rendering (reuses the game's brick style) ---------------------------- */
 const canvas = document.getElementById("editorCanvas");
 const ctx = canvas.getContext("2d");
 let gridOn = true;
@@ -235,10 +241,17 @@ function drawObjectEditor(o, isSelected){
       drawDoorShape(o.x,o.y,o.w,o.h, "#3d5af1", "#eef0ff", "#1f2d8a");
       break;
     case "button":
-      drawStoneBrick(o.x,o.y,o.w,o.h);
-      { const cx=o.x+o.w/2, cy=o.y+o.h/2, r=Math.min(o.w,o.h)*0.28;
-        ctx.fillStyle = o.state==="activated" ? "#4f8f6a" : "#8a6a3a";
-        ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill(); }
+      if(BUMP_SPRITES[0].complete && BUMP_SPRITES[0].naturalWidth){
+        const img = BUMP_SPRITES[0];
+        ctx.imageSmoothingEnabled = false;
+        const scale = o.w/img.naturalWidth, dw=o.w, dh=img.naturalHeight*scale;
+        ctx.drawImage(img, o.x, o.y+o.h-dh, dw, dh);
+      } else {
+        drawStoneBrick(o.x,o.y,o.w,o.h);
+        { const cx=o.x+o.w/2, cy=o.y+o.h/2, r=Math.min(o.w,o.h)*0.28;
+          ctx.fillStyle = o.state==="activated" ? "#4f8f6a" : "#8a6a3a";
+          ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill(); }
+      }
       break;
     case "sensor":
       ctx.fillStyle="rgba(61,90,241,.18)"; ctx.fillRect(o.x,o.y,o.w,o.h);
@@ -253,21 +266,21 @@ function drawObjectEditor(o, isSelected){
   }
   ctx.restore();
 
-  // étiquette id
+  // id label
   ctx.fillStyle="rgba(20,22,36,.65)"; ctx.font=(10/view.zoom)+"px monospace"; ctx.textAlign="left";
   ctx.fillText(o.id, o.x+3, o.y-3 < 8 ? o.y+12 : o.y-3);
 
   if(isSelected){
     ctx.strokeStyle="#3d5af1"; ctx.lineWidth=2/view.zoom; ctx.strokeRect(o.x-2,o.y-2,o.w+4,o.h+4);
-    // poignée de redimensionnement (coin bas-droit) — taille constante à l'écran
+    // resize handle (bottom-right corner) — constant on-screen size
     const hs = 12/view.zoom;
     ctx.fillStyle="#3d5af1"; ctx.fillRect(o.x+o.w-hs/2,o.y+o.h-hs/2,hs,hs);
   }
 }
 
-/* Porte : un cadre arrondi + un panneau intérieur + une barre + une
-   poignée, plutôt qu'un simple rectangle bleu. Partagée par le mode
-   édition et le mode test, et par la sortie et les objets "door". */
+/* Door: a rounded frame + an inner panel + a bar + a
+   handle, rather than a plain blue rectangle. Shared by edit mode
+   and test mode, and by the exit and "door" objects. */
 function drawDoorShape(x,y,w,h, mainColor, panelColor, knobColor){
   ctx.save();
   const r = Math.min(w,h)*0.18;
@@ -304,11 +317,11 @@ function drawDoorShape(x,y,w,h, mainColor, panelColor, knobColor){
   ctx.restore();
 }
 
-/* Carrelage du bloc Mario (block.png, 16x16 d'origine), mis à l'échelle
-   sur la grille du niveau (GRID) — même logique que le rendu du vrai jeu
-   (render.js), dupliquée ici pour le mode édition ET le mode test qui ont
+/* Mario block tiling (block.png, 16x16 native), scaled to
+   the level's grid (GRID) — same logic as the real game's rendering
+   (render.js), duplicated here for edit mode AND test mode, which have
    chacun leur propre contexte canvas (`ctx`, pas `ctx2d`). Tant que
-   l'image n'est pas chargée, repli sur l'ancien motif vectoriel. */
+   their own canvas context. While the image isn't loaded, falls back to the old vector pattern. */
 function drawBlockTile(x,y,w,h){
   ctx.save();
   ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
@@ -327,11 +340,11 @@ function drawBlockTile(x,y,w,h){
   ctx.restore();
 }
 
-/* Plante piranha : une image par unité de grille de largeur (GRID), toutes
-   animées EN MÊME TEMPS (horloge globale, pas de phase par objet) — change
-   de frame chaque seconde. Dupliqué du jeu (render.js) : contexte canvas
+/* Piranha plant: one image per grid unit of width (GRID), all
+   animated AT THE SAME TIME (shared clock, no per-object phase) — changes
+   frame every second. Duplicated from the game (render.js): a different canvas context
    distinct (`ctx`), horloge de mode test (`playNow`) au lieu de `now`. En
-   mode édition (pas de partie en cours), on utilise Date.now() à la place. */
+   (`ctx`). In edit mode (no game running), Date.now() is used instead. */
 function plantFrameIndex(){
   const t = (typeof playRunning!=="undefined" && playRunning) ? playNow : Date.now();
   return Math.floor(t/1000) % PLANT_SPRITES.length;
@@ -359,8 +372,8 @@ function drawPlantRow(x,y,w,h){
   }
 }
 
-/* Sortie (tube), avec repli vers l'ancienne porte tant que l'image ne
-   charge pas. */
+/* Exit (pipe), with a fallback to the old door while the image hasn't
+   loaded. */
 function drawExitSprite(x,y,w,h,curPlayMode){
   if(SPRITE_TUBE.complete && SPRITE_TUBE.naturalWidth>0){
     ctx.save();
@@ -372,10 +385,10 @@ function drawExitSprite(x,y,w,h,curPlayMode){
   }
 }
 
-/* Nuages du mode test — même logique que le jeu (render.js) : 2-3 nuages
-   parmi 3 tailles, dérive lente homogène, réinitialisés à chaque partie
-   test. Pas de nuages en mode édition (canevas de travail, pas d'aperçu
-   animé pour ne pas distraire). */
+/* Test-mode clouds — same logic as the game (render.js): 2-3 clouds
+   among 3 sizes, uniform slow drift, reset on each test
+   run. No clouds in edit mode (a working canvas, no animated
+   preview so as not to distract). */
 let clouds = [];
 let cloudDriftDir = 1;
 function initClouds(){
@@ -399,6 +412,54 @@ function drawClouds(){
     const img = CLOUD_SPRITES[c.spriteIdx];
     if(!img || !img.complete || !img.naturalWidth) continue;
     ctx.drawImage(img, c.x, c.y, img.naturalWidth, img.naturalHeight);
+  }
+}
+
+/* Test-mode button (bump.png, 3 frames) — same logic as the game
+   (render.js), duplicated here (separate `ctx` canvas context). */
+function drawButtonSpriteEd(o){
+  const phase = o.pressPhase || 0;
+  const img = phase<0.34 ? BUMP_SPRITES[0] : (phase<0.67 ? BUMP_SPRITES[1] : BUMP_SPRITES[2]);
+  if(!img || !img.complete || !img.naturalWidth){
+    drawStoneBrick(o.x,o.y,o.w,o.h);
+    const cx=o.x+o.w/2, cy=o.y+o.h/2, r=Math.min(o.w,o.h)*0.28;
+    ctx.fillStyle = phase>0.5 ? "#4f8f6a" : "#8a6a3a";
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+    return;
+  }
+  ctx.imageSmoothingEnabled = false;
+  const scale = o.w/img.naturalWidth, dw=o.w, dh=img.naturalHeight*scale;
+  ctx.drawImage(img, o.x, o.y+o.h-dh, dw, dh);
+}
+function playerButtonSinkOffset(){
+  let maxPhase = 0;
+  for(const o of playObjects){
+    if(o.kind==="button" && o.pressPhase>maxPhase && playOverlap(P,o)) maxPhase = o.pressPhase;
+  }
+  return maxPhase*8;
+}
+
+/* Player death explosion (same logic as the game, render.js). */
+let particles = [];
+function spawnDeathExplosion(x,y){
+  particles = [];
+  const colors = ["#e0455c","#8a5a2a","#f0a868","#fff3c4"];
+  for(let i=0;i<14;i++){
+    const angle = Math.random()*Math.PI*2;
+    const speed = 90+Math.random()*170;
+    particles.push({ x, y, vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed-120, size:3+Math.random()*4, color:colors[Math.floor(Math.random()*colors.length)], life:1 });
+  }
+}
+function updateParticles(dt){
+  if(!particles.length) return;
+  for(const p of particles){ p.vy += 1300*dt; p.x += p.vx*dt; p.y += p.vy*dt; p.life -= dt*0.55; }
+  particles = particles.filter(p => p.life>0 && p.y<H+60);
+}
+function drawParticles(){
+  for(const p of particles){
+    ctx.save(); ctx.globalAlpha = Math.max(0,Math.min(1,p.life)); ctx.fillStyle = p.color;
+    ctx.fillRect(p.x-p.size/2, p.y-p.size/2, p.size, p.size);
+    ctx.restore();
   }
 }
 
@@ -466,7 +527,7 @@ function render(){
   drawPlayerStartAndExit();
   if(mode==="link"){
     ctx.fillStyle="rgba(20,22,36,.7)"; ctx.font="13px sans-serif"; ctx.textAlign="center";
-    ctx.fillText(linkSourceId ? "Clique la cible du lien…" : "Clique l'objet source du lien…", W/2, 20);
+    ctx.fillText(linkSourceId ? "Click the link's target…" : "Click the link's source object…", W/2, 20);
   }
   ctx.restore();
 }
@@ -478,8 +539,8 @@ function canvasPoint(evt){
   const rect = canvas.getBoundingClientRect();
   const cx = (evt.touches ? evt.touches[0].clientX : evt.clientX) - rect.left;
   const cy = (evt.touches ? evt.touches[0].clientY : evt.clientY) - rect.top;
-  // écran -> pixels canvas (le canvas peut être affiché à une taille CSS
-  // différente de sa résolution interne) -> monde (en inversant zoom/pan).
+  // screen -> canvas pixels (the canvas can be displayed at a CSS size
+  // different from its internal resolution) -> world (by inverting zoom/pan).
   const px = cx * (canvas.width/rect.width), py = cy * (canvas.height/rect.height);
   return { x: (px-view.offsetX)/view.zoom, y: (py-view.offsetY)/view.zoom, screenX:px, screenY:py };
 }
@@ -644,11 +705,11 @@ const levelMetaEl = document.getElementById("levelMeta");
 const btnDuplicate = document.getElementById("btnDuplicate");
 const btnDelete = document.getElementById("btnDelete");
 
-/* Le panneau de propriétés est indépendant de la sélection : cliquer un
-   objet sur la scène le sélectionne (contour bleu, boutons dupliquer/
-   supprimer actifs) et rafraîchit le CONTENU du panneau, mais ne l'ouvre
-   pas. Seule l'icône ⚙️ (ou reposer un nouvel objet) l'ouvre ; le bouton ✕
-   et un clic en dehors le referment — sans perdre la sélection. */
+/* The properties panel is independent of selection: clicking an
+   object on the stage selects it (blue outline, duplicate/
+   delete buttons enabled) and refreshes the panel's CONTENT, but doesn't
+   open it. Only the ⚙️ icon (or placing a new object) opens it; the ✕
+   button and a click outside close it — without losing the selection. */
 let inspectorOpen = false;
 function setInspectorOpen(v){
   inspectorOpen = v;
@@ -659,8 +720,8 @@ document.getElementById("btnToggleInspector").addEventListener("click", ()=>{
   document.getElementById("palette").classList.remove("open");
   setInspectorOpen(!inspectorOpen);
 });
-/* Clic en dehors du panneau (et en dehors du canvas, qui gère déjà sa propre
-   sélection) : referme le panneau s'il était ouvert. */
+/* Click outside the panel (and outside the canvas, which already handles its
+   own selection): closes the panel if it was open. */
 document.addEventListener("pointerdown", (evt)=>{
   if(playRunning) return;
   if(!inspectorOpen) return;
@@ -684,13 +745,13 @@ function el(tag, attrs, ...children){
 function renderLevelMeta(){
   const lvl = curLevel();
   levelMetaEl.innerHTML = "";
-  const idField = el("div",{class:"field"}, el("label",{text:"Identifiant du niveau"}),
+  const idField = el("div",{class:"field"}, el("label",{text:"Level identifier"}),
     el("input",{type:"text", value:lvl.id, oninput:(e)=>{ lvl.id=e.target.value; }}));
   const nameField = el("div",{class:"field"}, el("label",{text:"Nom"}),
     el("input",{type:"text", value:lvl.name, oninput:(e)=>{ lvl.name=e.target.value; }}));
-  const diffField = el("div",{class:"field"}, el("label",{text:"Difficulté (1-5)"}),
+  const diffField = el("div",{class:"field"}, el("label",{text:"Difficulty (1-5)"}),
     el("input",{type:"number", min:"1", max:"5", value:lvl.difficulty, oninput:(e)=>{ lvl.difficulty=Math.max(1,Math.min(5,parseInt(e.target.value)||1)); }}));
-  const gravField = numField("Gravité (px/s², défaut "+DEFAULT_GRAVITY+")", lvl.gravity!=null?lvl.gravity:DEFAULT_GRAVITY, v=>{ lvl.gravity=v; });
+  const gravField = numField("Gravity (px/s², default "+DEFAULT_GRAVITY+")", lvl.gravity!=null?lvl.gravity:DEFAULT_GRAVITY, v=>{ lvl.gravity=v; });
   levelMetaEl.appendChild(idField); levelMetaEl.appendChild(nameField); levelMetaEl.appendChild(diffField); levelMetaEl.appendChild(gravField);
 }
 
@@ -726,9 +787,9 @@ function checkField(label, checked, onchange){
 function objectIdsExcept(id){
   return curLevel().objects.filter(o=>o.id!==id).map(o=>o.id);
 }
-/* Cibles spéciales de cascade, en plus des objets du niveau : SCENE (pour
-   changer un paramètre global comme la gravité) et PLAYER (pour agir
-   directement sur le personnage : taille, impulsion de déplacement). */
+/* Special cascade targets, in addition to level objects: SCENE (to
+   change a global parameter like gravity) and PLAYER (to act
+   directly on the character: size, movement impulse). */
 const SPECIAL_TARGETS = ["SCENE", "PLAYER"];
 function allCascadeTargets(id){
   return SPECIAL_TARGETS.concat(objectIdsExcept(id));
@@ -740,26 +801,35 @@ function renderActionParams(container, action, onchange){
     container.appendChild(numField("Tremblement avant chute (ms)", action.shakeMs!=null?action.shakeMs:400, v=>{ action.shakeMs=v; onchange(); }));
     container.appendChild(numField("Vitesse de chute (px/s)", action.fallSpeed!=null?action.fallSpeed:260, v=>{ action.fallSpeed=v; onchange(); }));
   } else if(action.type==="REVEAL"){
-    container.appendChild(numField("Délai avant révélation (ms)", action.delay!=null?action.delay:150, v=>{ action.delay=v; onchange(); }));
+    container.appendChild(numField("Delay before reveal (ms)", action.delay!=null?action.delay:150, v=>{ action.delay=v; onchange(); }));
   } else if(action.type==="APPEAR_TEMP"){
-    container.appendChild(numField("Durée avant rétractation (ms)", action.ms!=null?action.ms:500, v=>{ action.ms=v; onchange(); }));
+    container.appendChild(numField("Duration before retracting (ms)", action.ms!=null?action.ms:500, v=>{ action.ms=v; onchange(); }));
   } else if(action.type==="MOVE"){
     container.appendChild(selectField("Direction", [
       {type:"left",label:"Gauche"},{type:"right",label:"Droite"},{type:"up",label:"Haut"},{type:"down",label:"Bas"}
     ], action.direction||"right", v=>{ action.direction=v; onchange(); }));
     container.appendChild(numField("Vitesse maximale (px/s)", action.speed!=null?action.speed:100, v=>{ action.speed=v; onchange(); }));
-    container.appendChild(numField("Accélération (px/s², 0 = instantané)", action.acceleration!=null?action.acceleration:0, v=>{ action.acceleration=v; onchange(); }));
-    container.appendChild(numField("Durée du mouvement (ms, 0 = indéfini)", action.duration!=null?action.duration:1000, v=>{ action.duration=v; onchange(); }));
+    container.appendChild(numField("Acceleration (px/s², 0 = instant)", action.acceleration!=null?action.acceleration:0, v=>{ action.acceleration=v; onchange(); }));
+    container.appendChild(numField("Movement duration (ms, 0 = indefinite)", action.duration!=null?action.duration:1000, v=>{ action.duration=v; onchange(); }));
+  } else if(action.type==="MOVE_TO"){
+    container.appendChild(numField("Position X cible (px)", action.x!=null?action.x:0, v=>{ action.x=v; onchange(); }));
+    container.appendChild(numField("Position Y cible (px)", action.y!=null?action.y:0, v=>{ action.y=v; onchange(); }));
+    container.appendChild(numField("Vitesse (px/s)", action.speed!=null?action.speed:100, v=>{ action.speed=v; onchange(); }));
+    container.appendChild(numField("Acceleration (px/s², 0 = instant)", action.acceleration!=null?action.acceleration:0, v=>{ action.acceleration=v; onchange(); }));
   } else if(action.type==="ROTATE"){
     container.appendChild(selectField("Sens", [{type:"cw",label:"Horaire"},{type:"ccw",label:"Antihoraire"}], action.direction||"cw", v=>{ action.direction=v; onchange(); }));
-    container.appendChild(numField("Vitesse (degrés/s)", action.speed!=null?action.speed:90, v=>{ action.speed=v; onchange(); }));
-    container.appendChild(numField("Durée (ms, 0 = indéfini)", action.duration!=null?action.duration:0, v=>{ action.duration=v; onchange(); }));
+    container.appendChild(numField("Speed (degrees/s)", action.speed!=null?action.speed:90, v=>{ action.speed=v; onchange(); }));
+    container.appendChild(numField("Duration (ms, 0 = indefinite)", action.duration!=null?action.duration:0, v=>{ action.duration=v; onchange(); }));
   } else if(action.type==="SET_GRAVITY"){
-    container.appendChild(numField("Nouvelle gravité (px/s²)", action.value!=null?action.value:DEFAULT_GRAVITY, v=>{ action.value=v; onchange(); }));
+    container.appendChild(numField("New gravity (px/s²)", action.value!=null?action.value:DEFAULT_GRAVITY, v=>{ action.value=v; onchange(); }));
+  } else if(action.type==="SET_SPEED"){
+    container.appendChild(numField("New movement speed (px/s)", action.value!=null?action.value:DEFAULT_MOVE_SPEED, v=>{ action.value=v; onchange(); }));
+  } else if(action.type==="SET_CONTROLS"){
+    container.appendChild(selectField("Controls", [{type:"standard",label:"Standard"},{type:"inverted",label:"Inverted"}], action.value||"standard", v=>{ action.value=v; onchange(); }));
   } else if(action.type==="CHANGE_WIDTH"){
-    container.appendChild(numField("Nouvelle largeur du joueur (px)", action.value!=null?action.value:26, v=>{ action.value=v; onchange(); }));
+    container.appendChild(numField("New player width (px)", action.value!=null?action.value:26, v=>{ action.value=v; onchange(); }));
   } else if(action.type==="CHANGE_HEIGHT"){
-    container.appendChild(numField("Nouvelle hauteur du joueur (px)", action.value!=null?action.value:38, v=>{ action.value=v; onchange(); }));
+    container.appendChild(numField("New player height (px)", action.value!=null?action.value:38, v=>{ action.value=v; onchange(); }));
   }
 }
 
@@ -770,7 +840,7 @@ function renderInspector(){
   if(selectedId==="__exit__"){
     btnDuplicate.disabled = true; btnDelete.disabled = true;
     const e = lvl.exit;
-    inspectorBody.appendChild(el("p",{}, document.createTextNode("Sortie du niveau")));
+    inspectorBody.appendChild(el("p",{}, document.createTextNode("Level exit")));
     const row = el("div",{class:"row2"});
     row.appendChild(numField("x", e.x, v=>{ e.x=v; render(); }));
     row.appendChild(numField("y", e.y, v=>{ e.y=v; render(); }));
@@ -784,7 +854,7 @@ function renderInspector(){
   if(selectedId==="__playerStart__"){
     btnDuplicate.disabled = true; btnDelete.disabled = true;
     const p = lvl.playerStart;
-    inspectorBody.appendChild(el("p",{}, document.createTextNode("Point de départ du joueur")));
+    inspectorBody.appendChild(el("p",{}, document.createTextNode("Player starting point")));
     const row = el("div",{class:"row2"});
     row.appendChild(numField("x", p.x, v=>{ p.x=v; render(); }));
     row.appendChild(numField("y", p.y, v=>{ p.y=v; render(); }));
@@ -795,12 +865,12 @@ function renderInspector(){
   const o = selectedObj();
   if(!o){
     btnDuplicate.disabled = true; btnDelete.disabled = true;
-    inspectorBody.innerHTML = '<p class="empty">Rien n\'est sélectionné. Clique un objet sur la scène, ou choisis un élément dans la bibliothèque pour en poser un nouveau.</p>';
+    inspectorBody.innerHTML = '<p class="empty">Nothing selected. Click an object on the stage, or pick an item from the library to place a new one.</p>';
     return;
   }
   btnDuplicate.disabled = false; btnDelete.disabled = isLocked(o.id);
   if(isLocked(o.id)){
-    inspectorBody.appendChild(el("p",{class:"empty", text:"Mur de bordure par défaut — ne peut pas être supprimé."}));
+    inspectorBody.appendChild(el("p",{class:"empty", text:"Default boundary wall — cannot be deleted."}));
   }
 
   inspectorBody.appendChild(el("div",{class:"field"},
@@ -808,7 +878,7 @@ function renderInspector(){
     el("input",{type:"text", value:o.id, oninput:(e)=>{
       const v = e.target.value.trim();
       const dup = curLevel().objects.some(other=>other!==o && other.id===v);
-      warnEl.textContent = (!v || dup) ? "Identifiant vide ou déjà utilisé." : "";
+      warnEl.textContent = (!v || dup) ? "Empty or already-used identifier." : "";
       if(v && !dup){
         const oldId = o.id;
         for(const other of curLevel().objects){
@@ -830,28 +900,28 @@ function renderInspector(){
   sizeRow.appendChild(numField("hauteur", o.h, v=>{ o.h=Math.max(4,v); render(); }));
   inspectorBody.appendChild(sizeRow);
 
-  inspectorBody.appendChild(selectField("Type d'objet (kind)", KIND_LIB.map(k=>({type:k.kind,label:k.label})), o.kind, v=>{ o.kind=v; render(); }));
+  inspectorBody.appendChild(selectField("Object type (kind)", KIND_LIB.map(k=>({type:k.kind,label:k.label})), o.kind, v=>{ o.kind=v; render(); }));
 
-  inspectorBody.appendChild(checkField("Solide (bloque le joueur)", o.solid, v=>{ o.solid=v; }));
+  inspectorBody.appendChild(checkField("Solid (blocks the player)", o.solid, v=>{ o.solid=v; }));
   inspectorBody.appendChild(checkField("Dangereux au contact (hazard)", o.hazard, v=>{ o.hazard=v; }));
-  inspectorBody.appendChild(checkField("Visible au démarrage", o.visible!==false, v=>{ o.visible=v; render(); }));
-  inspectorBody.appendChild(checkField("Bloquant même invisible (sinon : invisible = non solide, tant qu'il n'est pas révélé)", o.solidWhenHidden, v=>{ o.solidWhenHidden=v; }));
+  inspectorBody.appendChild(checkField("Visible at start", o.visible!==false, v=>{ o.visible=v; render(); }));
+  inspectorBody.appendChild(checkField("Solid even hidden (otherwise: invisible = non-solid, until revealed)", o.solidWhenHidden, v=>{ o.solidWhenHidden=v; }));
 
   if(o.kind==="hidden_spike"){
-    inspectorBody.appendChild(selectField("Direction du pic", [
-      {type:"0", label:"Vers le haut"},
-      {type:"90", label:"Vers la droite"},
-      {type:"180", label:"Vers le bas"},
-      {type:"270", label:"Vers la gauche"},
+    inspectorBody.appendChild(selectField("Spike direction", [
+      {type:"0", label:"Up"},
+      {type:"90", label:"Right"},
+      {type:"180", label:"Down"},
+      {type:"270", label:"Left"},
     ], String(o.angle||0), v=>{ o.angle = parseInt(v,10); render(); }));
   }
 
-  inspectorBody.appendChild(textareaField("Description (affichée si le joueur meurt à cause de cet objet)", o.description, v=>{ o.description=v; }));
+  inspectorBody.appendChild(textareaField("Description (shown if the player dies because of this object)", o.description, v=>{ o.description=v; }));
 
   // ---- Trigger ----
   if(!o.trap) o.trap = {};
   const trigBox = el("div",{class:"sectionBox"});
-  trigBox.appendChild(el("div",{class:"sectionTitle", text:"Déclencheur (trigger)"}));
+  trigBox.appendChild(el("div",{class:"sectionTitle", text:"Trigger"}));
   const trigType = o.trap.trigger ? o.trap.trigger.type : "NONE";
   trigBox.appendChild(selectField("Type", TRIGGER_TYPES, trigType, v=>{
     if(v==="NONE"){ delete o.trap.trigger; } else { o.trap.trigger = Object.assign({type:v}, o.trap.trigger&&o.trap.trigger.type===v?o.trap.trigger:{}); }
@@ -859,13 +929,13 @@ function renderInspector(){
   }));
   if(o.trap.trigger){
     if(o.trap.trigger.type==="ON_TIMER"){
-      trigBox.appendChild(numField("Délai depuis le début du niveau (ms)", o.trap.trigger.delay||0, v=>{ o.trap.trigger.delay=v; }));
+      trigBox.appendChild(numField("Delay from level start (ms)", o.trap.trigger.delay||0, v=>{ o.trap.trigger.delay=v; }));
     } else if(o.trap.trigger.type==="ON_ATTEMPT"){
       trigBox.appendChild(numField("Nombre de tentatives minimum", o.trap.trigger.count||1, v=>{ o.trap.trigger.count=v; }));
     } else if(o.trap.trigger.type==="ON_ENTER"){
-      trigBox.appendChild(selectField("Sens d'entrée requis", [
-        {type:"any",label:"Peu importe"},{type:"left",label:"Par la gauche"},{type:"right",label:"Par la droite"},
-        {type:"top",label:"Par le haut"},{type:"bottom",label:"Par le bas"},
+      trigBox.appendChild(selectField("Required entry direction", [
+        {type:"any",label:"Any"},{type:"left",label:"From the left"},{type:"right",label:"From the right"},
+        {type:"top",label:"From the top"},{type:"bottom",label:"From the bottom"},
       ], o.trap.trigger.fromSide||"any", v=>{ o.trap.trigger.fromSide = v==="any" ? undefined : v; }));
     }
   }
@@ -873,7 +943,7 @@ function renderInspector(){
 
   // ---- Action ----
   const actBox = el("div",{class:"sectionBox"});
-  actBox.appendChild(el("div",{class:"sectionTitle", text:"Action (sur cet objet)"}));
+  actBox.appendChild(el("div",{class:"sectionTitle", text:"Action (on this object)"}));
   const actType = o.trap.action ? o.trap.action.type : "NONE";
   actBox.appendChild(selectField("Type", ACTION_TYPES, actType, v=>{
     o.trap.action = v==="NONE" ? {type:"NONE"} : {type:v};
@@ -886,11 +956,11 @@ function renderInspector(){
 
   // ---- Cascade (then) ----
   const casBox = el("div",{class:"sectionBox"});
-  casBox.appendChild(el("div",{class:"sectionTitle", text:"Cascade (déclenche d'autres objets, la scène ou le joueur)"}));
+  casBox.appendChild(el("div",{class:"sectionTitle", text:"Cascade (triggers other objects, the scene, or the player)"}));
   const others = allCascadeTargets(o.id);
   if(!o.trap.then) o.trap.then = [];
   if(!o.trap.then.length){
-    casBox.appendChild(el("p",{class:"empty", text:"Aucun lien. Utilise \"Lier →\" ci-dessous (objets uniquement) ou ajoute une entrée dans la liste (objets, SCENE, PLAYER)."}));
+    casBox.appendChild(el("p",{class:"empty", text:"No links. Use \"Link →\" below (objects only) or add an entry in the list (objects, SCENE, PLAYER)."}));
   }
   o.trap.then.forEach((link, idx)=>{
     const row = el("div",{class:"thenRow"});
@@ -900,21 +970,21 @@ function renderInspector(){
     );
     row.appendChild(top);
     row.appendChild(selectField("Cible", others.map(id=>({type:id,label:id})), link.target, v=>{ link.target=v; link.action={type:"NONE"}; renderInspector(); render(); }));
-    row.appendChild(numField("Délai (ms)", link.delay||0, v=>{ link.delay=v; }));
+    row.appendChild(numField("Delay (ms)", link.delay||0, v=>{ link.delay=v; }));
     if(!link.action) link.action = {type:"NONE"};
-    row.appendChild(selectField("Action sur la cible", actionTypesForTarget(link.target), link.action.type, v=>{ link.action={type:v}; renderInspector(); }));
+    row.appendChild(selectField("Action on the target", actionTypesForTarget(link.target), link.action.type, v=>{ link.action={type:v}; renderInspector(); }));
     const paramsWrap = el("div",{});
     row.appendChild(paramsWrap);
     renderActionParams(paramsWrap, link.action, ()=>{});
     casBox.appendChild(row);
   });
-  const addBtn = el("button",{class:"addBtn", text:"+ Ajouter une cascade (liste)", onclick:()=>{
+  const addBtn = el("button",{class:"addBtn", text:"+ Add a cascade (list)", onclick:()=>{
     if(!others.length) return;
     o.trap.then.push({ target:others[0], delay:200, action:{type:"NONE"} });
     renderInspector();
   }});
   casBox.appendChild(addBtn);
-  const linkBtn = el("button",{class:"addBtn", text: (mode==="link"&&linkSourceId===o.id) ? "Annuler le lien…" : "🔗 Lier → (clique la cible sur la scène)", onclick:()=>{
+  const linkBtn = el("button",{class:"addBtn", text: (mode==="link"&&linkSourceId===o.id) ? "Cancel link…" : "🔗 Link → (click the target on the stage)", onclick:()=>{
     if(mode==="link" && linkSourceId===o.id){ mode="select"; linkSourceId=null; }
     else { mode="link"; linkSourceId=o.id; }
     render();
@@ -955,12 +1025,12 @@ window.addEventListener("keydown", (e)=>{
 /* ---------------------------- Grille ---------------------------- */
 document.getElementById("chkGrid").addEventListener("change", (e)=>{ gridOn = e.target.checked; render(); });
 
-/* ---------------------------- Import / Export JSON (un seul niveau) ---------------------------- */
+/* ---------------------------- Import / Export JSON (single level) ---------------------------- */
 document.getElementById("btnExport").addEventListener("click", ()=>{
   const blob = new Blob([JSON.stringify(level, null, 2)], {type:"application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const safeName = (level.id || "niveau").replace(/[^a-z0-9_-]+/gi, "-");
+  const safeName = (level.id || "level").replace(/[^a-z0-9_-]+/gi, "-");
   a.href = url; a.download = safeName + ".json";
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
@@ -973,15 +1043,15 @@ document.getElementById("fileImport").addEventListener("change", (e)=>{
   reader.onload = () => {
     try{
       const parsed = JSON.parse(reader.result);
-      /* Accepte un niveau seul (format courant), ou par confort un ancien
-         export multi-niveaux ({levels:[...]} ou tableau) dont on ne reprend
-         que le premier niveau. */
+      /* Accepts a single level (the current format), or for convenience an
+         older multi-level export ({levels:[...]} or an array), from which
+         only the first level is used. */
       let imported;
       if(Array.isArray(parsed)) imported = parsed[0];
       else if(parsed.levels) imported = parsed.levels[0];
       else imported = parsed;
-      if(!imported || !imported.objects) throw new Error("format de niveau inattendu");
-      level = Object.assign(makeEmptyLevel(imported.id||null, imported.name||"Niveau"), imported);
+      if(!imported || !imported.objects) throw new Error("unexpected level format");
+      level = Object.assign(makeEmptyLevel(imported.id||null, imported.name||"Level"), imported);
       selectedId = null; mode="select"; placeKind=null; linkSourceId=null;
       renderLevelMeta(); renderInspector(); refreshPaletteActive(); fitView(); render();
     }catch(err){ alert("Fichier JSON invalide : "+err.message); }
@@ -990,18 +1060,19 @@ document.getElementById("fileImport").addEventListener("change", (e)=>{
   e.target.value = "";
 });
 document.getElementById("btnResetLevel").addEventListener("click", () => {
-  if(!confirm("Tout réinitialiser ? Le niveau en cours sera perdu (pense à l'exporter avant si besoin).")) return;
-  level = makeEmptyLevel(null, "Niveau 1");
+  if(!confirm("Reset everything? The current level will be lost (export it first if needed).")) return;
+  level = makeEmptyLevel(null, "Level 1");
   selectedId = null; mode="select"; placeKind=null; linkSourceId=null;
   setInspectorOpen(false);
   renderLevelMeta(); renderInspector(); refreshPaletteActive(); fitView(); render();
 });
 
-/* ---------------------------- Fenêtre Firebase ---------------------------- */
+/* ---------------------------- Firebase window ---------------------------- */
 const fbBackdrop = document.getElementById("fbBackdrop");
 const fbModal = document.getElementById("fbModal");
 function openFirebaseModal(){
   fbBackdrop.classList.add("show"); fbModal.classList.add("show");
+  setFirebaseTab("loadsave");
   refreshFirebaseLevelList();
 }
 function closeFirebaseModal(){ fbBackdrop.classList.remove("show"); fbModal.classList.remove("show"); }
@@ -1009,16 +1080,27 @@ document.getElementById("btnFirebase").addEventListener("click", openFirebaseMod
 document.getElementById("fbModalClose").addEventListener("click", closeFirebaseModal);
 fbBackdrop.addEventListener("click", closeFirebaseModal);
 
+function setFirebaseTab(tab){
+  const isLoad = tab==="loadsave";
+  document.getElementById("fbTabLoadSave").classList.toggle("active", isLoad);
+  document.getElementById("fbTabManage").classList.toggle("active", !isLoad);
+  document.getElementById("fbPanelLoadSave").style.display = isLoad ? "" : "none";
+  document.getElementById("fbPanelManage").style.display = isLoad ? "none" : "";
+  if(!isLoad) refreshFirebaseManageList();
+}
+document.getElementById("fbTabLoadSave").addEventListener("click", ()=>setFirebaseTab("loadsave"));
+document.getElementById("fbTabManage").addEventListener("click", ()=>setFirebaseTab("manage"));
+
 document.getElementById("fbSaveBtn").addEventListener("click", async ()=>{
   const status = document.getElementById("fbStatusSelect").value;
   const msg = document.getElementById("fbSaveStatus");
   msg.textContent = "Sauvegarde en cours…"; msg.className = "fbStatusMsg";
   try{
     await firebaseSaveLevel(level, status);
-    msg.textContent = "Niveau \""+level.name+"\" sauvegardé ("+status+")."; msg.className = "fbStatusMsg ok";
+    msg.textContent = "Level \""+level.name+"\" saved ("+status+")."; msg.className = "fbStatusMsg ok";
     refreshFirebaseLevelList();
   }catch(err){
-    msg.textContent = "Échec : " + err.message; msg.className = "fbStatusMsg error";
+    msg.textContent = "Failed: " + err.message; msg.className = "fbStatusMsg error";
   }
 });
 
@@ -1026,11 +1108,11 @@ document.getElementById("fbRefreshBtn").addEventListener("click", refreshFirebas
 
 async function refreshFirebaseLevelList(){
   const listEl = document.getElementById("fbLevelList");
-  listEl.innerHTML = '<p class="empty">Chargement…</p>';
+  listEl.innerHTML = '<p class="empty">Loading…</p>';
   try{
     const levels = await firebaseListLevels();
     const ids = Object.keys(levels);
-    if(!ids.length){ listEl.innerHTML = '<p class="empty">Aucun niveau sur Firebase pour l\'instant.</p>'; return; }
+    if(!ids.length){ listEl.innerHTML = '<p class="empty">No levels on Firebase yet.</p>'; return; }
     listEl.innerHTML = "";
     for(const id of ids){
       const lv = levels[id];
@@ -1042,30 +1124,102 @@ async function refreshFirebaseLevelList(){
         '<div class="fbMeta">'+id+'</div></div>'+
         '<div style="display:flex;align-items:center;gap:8px;">'+
         '<span class="fbBadge '+status+'">'+status+'</span>'+
-        '<button class="tbtn" data-load-id="'+id+'">Charger</button>'+
+        '<button class="tbtn" data-load-id="'+id+'">Load</button>'+
         '</div>';
       row.querySelector("[data-load-id]").addEventListener("click", async ()=>{
         try{
           const loaded = await firebaseLoadLevel(id);
-          level = Object.assign(makeEmptyLevel(loaded.id||id, loaded.name||"Niveau"), loaded);
+          level = Object.assign(makeEmptyLevel(loaded.id||id, loaded.name||"Level"), loaded);
           selectedId = null; mode="select"; placeKind=null; linkSourceId=null;
           renderLevelMeta(); renderInspector(); refreshPaletteActive(); fitView(); render();
           closeFirebaseModal();
-        }catch(err){ alert("Échec du chargement : " + err.message); }
+        }catch(err){ alert("Load failed: " + err.message); }
       });
       listEl.appendChild(row);
     }
   }catch(err){
-    listEl.innerHTML = '<p class="empty">Erreur : '+err.message+'</p>';
+    listEl.innerHTML = '<p class="empty">Error: '+err.message+'</p>';
   }
 }
 
+/* "Organize" tab: editable list (order / name), with deletion.
+   Each row loads the full level once (so it can be
+   re-save it intact with just order/name changed) and only writes to
+   Firebase when you click "Save" on THAT row. */
+async function refreshFirebaseManageList(){
+  const listEl = document.getElementById("fbManageList");
+  const statusEl = document.getElementById("fbManageStatus");
+  statusEl.textContent = "";
+  listEl.innerHTML = '<p class="empty">Loading…</p>';
+  try{
+    const levels = await firebaseListLevels();
+    const ids = Object.keys(levels);
+    if(!ids.length){ listEl.innerHTML = '<p class="empty">No levels on Firebase yet.</p>'; return; }
+    // Sort by existing order (falling back to id) so the list already reflects the current ranking.
+    ids.sort((a,b)=>{
+      const oa = levels[a].order, ob = levels[b].order;
+      if(oa!=null && ob!=null) return oa-ob;
+      if(oa!=null) return -1;
+      if(ob!=null) return 1;
+      return (parseInt(a,10)||0)-(parseInt(b,10)||0);
+    });
+    listEl.innerHTML = "";
+    for(const id of ids){
+      const lv = levels[id];
+      const status = lv.status==="FINAL" ? "FINAL" : "PRODUCTION";
+      const row = document.createElement("div");
+      row.className = "fbManageRow";
+      row.innerHTML =
+        '<div class="fbManageTop">'+
+          '<input type="number" class="fbOrderInput" value="'+(lv.order!=null?lv.order:"")+'" placeholder="#" title="Ordre d\'affichage">'+
+          '<input type="text" class="fbNameInput" value="'+(lv.name||"").replace(/"/g,"&quot;")+'">'+
+          '<span class="fbBadge '+status+'">'+status+'</span>'+
+        '</div>'+
+        '<div class="fbManageId">'+id+'</div>'+
+        '<div class="fbManageActions">'+
+          '<button class="tbtn primary" data-save="'+id+'">Enregistrer</button>'+
+          '<button class="tbtn danger" data-delete="'+id+'">Supprimer</button>'+
+        '</div>';
+      row.querySelector("[data-save]").addEventListener("click", async (e)=>{
+        const orderVal = row.querySelector(".fbOrderInput").value;
+        const nameVal = row.querySelector(".fbNameInput").value.trim();
+        const updated = Object.assign({}, lv, {
+          name: nameVal || lv.name,
+          order: orderVal==="" ? undefined : Number(orderVal),
+        });
+        e.target.textContent = "…";
+        try{
+          await firebaseSaveLevel(updated, lv.status||"PRODUCTION");
+          statusEl.textContent = "\""+updated.name+"\" updated."; statusEl.className = "fbStatusMsg ok";
+        }catch(err){
+          statusEl.textContent = "Failed: "+err.message; statusEl.className = "fbStatusMsg error";
+        }
+        e.target.textContent = "Enregistrer";
+      });
+      row.querySelector("[data-delete]").addEventListener("click", async ()=>{
+        if(!confirm("Permanently delete level \""+(lv.name||id)+"\" from Firebase?")) return;
+        try{
+          await firebaseDeleteLevel(id);
+          row.remove();
+          statusEl.textContent = "Level deleted."; statusEl.className = "fbStatusMsg ok";
+        }catch(err){
+          statusEl.textContent = "Delete failed: "+err.message; statusEl.className = "fbStatusMsg error";
+        }
+      });
+      listEl.appendChild(row);
+    }
+  }catch(err){
+    listEl.innerHTML = '<p class="empty">Error: '+err.message+'</p>';
+  }
+}
+document.getElementById("fbManageRefresh").addEventListener("click", refreshFirebaseManageList);
+
 /* =========================================================================
-   MODE TEST — réutilise le moteur du jeu (trigger/action/cascade + physique)
-   directement sur le niveau en cours d'édition, pour un aller-retour immédiat.
+   TEST MODE — reuses the game's engine (trigger/action/cascade + physics)
+   directly on the level being edited, for an immediate round-trip.
    ========================================================================= */
 let playRunning = false;
-let P = null; // état du joueur en mode test
+let P = null; // player state in test mode
 let playObjects = [], playObjectsById = {}, playTimers = [], playNow = 0, playMode="playing", playLastCause=null;
 const playInput = { left:false, right:false, jumpQueued:false };
 
@@ -1091,12 +1245,12 @@ function playApplyAction(obj, action){
       break;
     case "DISAPPEAR": obj.visible=false; obj.solid=false; obj.hazard=false; playFireCascade(obj); break;
     case "REVEAL":
-      /* Rend l'objet visible et restaure sa solidité d'origine — sans
-         jamais forcer "hazard" à true : le danger dépend uniquement de ce
-         qui est coché dans "Dangereux au contact" pour CET objet. Un pic
-         caché est configuré hazard=true dès le départ (mais reste inoffensif
-         tant qu'il est invisible, la vérification de dégât exige les deux) ;
-         un mur normal reste hazard=false et redevient donc un mur normal. */
+      /* Makes the object visible and restores its original solidity —
+         never forcing "hazard" to true: the danger only depends on
+         whatever is checked in "Dangerous on contact" for THIS object. A
+         hidden spike is configured hazard=true from the start (but stays
+         harmless while invisible, since the damage check requires both);
+         a normal wall stays hazard=false and simply goes back to being one. */
       playScheduleTimer(action.delay||0, ()=>{
         const src = playObjectsById[obj.id];
         obj.visible=true;
@@ -1110,12 +1264,13 @@ function playApplyAction(obj, action){
     case "APPEAR_TEMP": obj.visible=true; obj.solid=true; playScheduleTimer(action.ms||500, ()=>{ obj.visible=false; obj.solid=false; }); playFireCascade(obj); break;
     case "DISABLE": return;
     case "MOVE":
-      /* Chaque MOVE ne pilote QUE l'axe correspondant à sa direction
-         (gauche/droite => X, haut/bas => Y), sans toucher à l'autre axe —
-         deux MOVE sur des axes différents s'additionnent donc en diagonale
-         au lieu de s'annuler. Un second MOVE sur le MÊME axe remplace
-         proprement le premier (comportement attendu). */
+      /* Each MOVE only drives the axis matching its direction
+         (left/right => X, up/down => Y), without touching the other axis —
+         two MOVEs on different axes add up into a diagonal instead of
+         cancelling out. A second MOVE on the SAME axis cleanly replaces
+         cleanly replaces the first (expected behavior). */
       {
+        obj.moveTarget = null;
         const speed = action.speed!=null?action.speed:100;
         const dir = action.direction||"right";
         const axis = (dir==="left"||dir==="right") ? "x" : "y";
@@ -1134,6 +1289,19 @@ function playApplyAction(obj, action){
       }
       playFireCascade(obj);
       break;
+    case "MOVE_TO":
+      /* Moves the object directly to a given (x,y) position, at a given
+         speed (with optional acceleration) — the duration is derived from
+         the distance, instead of having to calculate it by hand. */
+      obj.moveX = null; obj.moveY = null;
+      obj.moveTarget = {
+        tx: action.x!=null?action.x:obj.x, ty: action.y!=null?action.y:obj.y,
+        speed: action.speed!=null?action.speed:100, accel: action.acceleration||0,
+        speedCur: action.acceleration ? 0 : (action.speed!=null?action.speed:100),
+      };
+      obj.state = "moving";
+      playFireCascade(obj);
+      break;
     case "ROTATE":
       obj.state="rotating"; obj.angle=obj.angle||0;
       obj.rotateSpeed = (action.direction==="ccw"?-1:1) * (action.speed!=null?action.speed:90);
@@ -1143,22 +1311,26 @@ function playApplyAction(obj, action){
     default: playFireCascade(obj);
   }
 }
-/* Actions sur les cibles spéciales SCENE et PLAYER (cf. SCENE_ACTION_TYPES /
-   PLAYER_ACTION_TYPES). Séparées de playApplyAction car ni la scène ni le
-   joueur ne sont des objets du niveau. */
+/* Actions on the special SCENE and PLAYER targets (cf. SCENE_ACTION_TYPES /
+   PLAYER_ACTION_TYPES). Kept separate from playApplyAction because neither the scene nor the
+   player are level objects. */
 function applySceneAction(action){
   if(action.type==="SET_GRAVITY"){
     currentGravity = action.value!=null ? action.value : DEFAULT_GRAVITY;
+  } else if(action.type==="SET_SPEED"){
+    currentMoveSpeed = action.value!=null ? action.value : DEFAULT_MOVE_SPEED;
+  } else if(action.type==="SET_CONTROLS"){
+    controlsInverted = (action.value==="inverted");
   }
 }
 function applyPlayerAction(action){
   if(action.type==="CHANGE_WIDTH"){
     const newW = action.value!=null ? action.value : 26;
-    P.x += (P.w-newW)/2; // recentre horizontalement pour éviter un saut brusque
+    P.x += (P.w-newW)/2; // recenters horizontally to avoid a sudden jump
     P.w = newW;
   } else if(action.type==="CHANGE_HEIGHT"){
     const newH = action.value!=null ? action.value : 38;
-    P.y += (P.h-newH); // garde les pieds au même endroit (ancre en bas)
+    P.y += (P.h-newH); // keeps the feet in the same place (anchored at the bottom)
     P.h = newH;
   } else if(action.type==="MOVE"){
     const speed = action.speed!=null?action.speed:100;
@@ -1175,11 +1347,11 @@ function applyPlayerAction(action){
   }
 }
 function playFireCascade(obj){
-  /* Chaque lien de cascade s'applique indépendamment, même si la cible a
-     déjà reçu une action d'un autre lien (ex : un premier lien qui la fait
-     apparaître, un second qui la fait bouger). `triggered` sert seulement à
-     empêcher le déclencheur PROPRE de la cible de se redéclencher tout
-     seul — il ne doit jamais empêcher une cascade explicite de s'appliquer. */
+  /* Each cascade link applies independently, even if the target has
+     already received an action from another link (e.g. a first link that
+     makes it appear, a second that makes it move). `triggered` only
+     prevents the target's OWN trigger from firing again on its own — it
+     must never block an explicit cascade from being applied. */
   const def = playObjectsById[obj.id];
   if(!def || !def.trap || !def.trap.then) return;
   for(const link of def.trap.then){
@@ -1191,9 +1363,9 @@ function playFireCascade(obj){
     });
   }
 }
-/* Détermine de quel(s) côté(s) une boîte (prevBox) qui ne chevauchait pas
-   `obj` est entrée en chevauchement dans `obj`, en comparant à sa position
-   après déplacement (newBox). Sert au trigger ON_ENTER avec sens requis. */
+/* Determines from which side(s) a box (prevBox) that wasn't overlapping
+   `obj` entered into overlap with `obj`, by comparing it to its
+   post-movement position (newBox). Used by the ON_ENTER trigger with a required direction. */
 function enteredFromSides(prevBox, newBox, obj){
   const sides = [];
   if(prevBox.x+prevBox.w <= obj.x && newBox.x+newBox.w > obj.x) sides.push("left");
@@ -1211,7 +1383,7 @@ function playCheckTrigger(obj){
     case "ON_ENTER": {
       if(!playOverlap(P, obj)) return false;
       if(!t.fromSide) return true;
-      if(playPrevBox && playOverlap(playPrevBox, obj)) return false; // déjà dedans, pas une "entrée"
+      if(playPrevBox && playOverlap(playPrevBox, obj)) return false; // already inside, not an "entry"
       const sides = playPrevBox ? enteredFromSides(playPrevBox, P, obj) : [];
       return sides.includes(t.fromSide);
     }
@@ -1226,22 +1398,24 @@ let walkPhase = 0;
 let showHiddenInPlay = false;
 function playBuildLevel(){
   const lvl = curLevel();
-  playObjects = JSON.parse(JSON.stringify(lvl.objects)).map(o=>Object.assign({visible:true,hazard:!!o.hazard,triggered:false,state:"idle"}, o));
+  playObjects = JSON.parse(JSON.stringify(lvl.objects)).map(o=>Object.assign({visible:true,hazard:!!o.hazard,triggered:false,state:"idle",pressPhase:0}, o));
   playObjectsById = {};
   for(const o of lvl.objects) playObjectsById[o.id]=o;
   P = { x:lvl.playerStart.x, y:lvl.playerStart.y, w:26, h:38, vx:0, vy:0, grounded:false, groundedOn:null,
     prevGroundedOn:null, justLandedOn:null, justJumped:false, lastBump:null, lastGroundY:null, moveX:null, moveY:null, facing:1 };
   playTimers=[]; playNow=0; playMode="playing"; playLastCause=null; walkPhase=0; playPrevBox=null;
   currentGravity = lvl.gravity!=null ? lvl.gravity : DEFAULT_GRAVITY;
+  currentMoveSpeed = DEFAULT_MOVE_SPEED;
+  controlsInverted = false;
   initClouds();
   hidePlayMsg();
 }
-/* Boîte de collision effective d'un objet : pour un objet qui tourne, on
-   utilise le rectangle aligné sur les axes qui englobe exactement sa forme
-   pivotée (il grandit/rétrécit avec l'angle). C'est une approximation
-   simple (pas une vraie collision de rectangle orienté), mais elle garde
-   la physique cohérente avec le rendu visuel : le joueur peut monter sur
-   une plateforme en rotation et sa hauteur d'appui suit l'inclinaison. */
+/* An object's effective collision box: for a rotating object, we use the
+   axis-aligned rectangle that exactly bounds its rotated shape (it grows/
+   shrinks with the angle). This is a simple approximation (not real
+   oriented-rectangle collision), but it keeps the physics consistent
+   with the visual rendering: the player can climb onto
+   climb onto a rotating platform and its support height follows the tilt. */
 function effectiveBox(o){
   if(o.angle){
     const rad = o.angle*Math.PI/180;
@@ -1254,20 +1428,20 @@ function effectiveBox(o){
   return o;
 }
 function playResolve(dt){
-  /* fallSign = sens de la gravité actuelle (1 = normale, -1 = inversée).
-     Toute la résolution ci-dessous est symétrique par rapport à ce signe :
-     avec une gravité inversée, "atterrir" veut dire se coller au DESSOUS
-     d'une plateforme (le sol est au plafond), et le rattrapage de saut
-     s'applique vers une plateforme plus basse (dans le sens opposé à la
-     gravité) plutôt que plus haute. */
+  /* fallSign = direction of current gravity (1 = normal, -1 = inverted).
+     All the resolution below is symmetric with respect to this sign:
+     with inverted gravity, "landing" means sticking to the UNDERSIDE
+     from a platform (the ground is at the ceiling), and the jump catch-up
+     applies toward a lower platform (in the direction opposite to
+     gravity) rather than a higher one. */
   const fallSign = currentGravity >= 0 ? 1 : -1;
   const prevBottom=P.y+P.h, prevTop=P.y;
   P.x += P.vx*dt; P.y += P.vy*dt;
   P.grounded=false; P.groundedOn=null;
   for(const o of playObjects){
-    /* Un objet invisible ne bloque pas physiquement par défaut (sinon un
-       piège qu'on a réussi à éviter continuerait à gêner le joueur) — sauf
-       si "Bloquant même invisible" est explicitement coché. */
+    /* An invisible object doesn't block physically by default (otherwise
+       a trap the player successfully avoided would keep getting in the
+       way) — unless "Solid even hidden" is explicitly checked. */
     if(!o.solid) continue;
     if(o.visible===false && !o.solidWhenHidden) continue;
     const box = effectiveBox(o);
@@ -1284,10 +1458,10 @@ function playResolve(dt){
     const overlapX = Math.min(P.x+P.w,box.x+box.w)-Math.max(P.x,box.x);
     const overlapY = Math.min(P.y+P.h,box.y+box.h)-Math.max(P.y,box.y);
     if(overlapX<overlapY){
-      /* Aide au pas : mesurée par rapport à la position AVANT le déplacement
-         de cette image, et seulement pour grimper vers une plateforme
-         nettement plus proche du "plafond effectif" que celle qu'on vient
-         de quitter (un saut à peine trop court) — jamais pour boucher un
+      /* Step-up assist: measured against the position BEFORE this frame's movement
+         (measured against the position before this frame's movement), and only for climbing onto a platform
+         noticeably closer to the "effective ceiling" than the one just
+         (a jump that's just barely too short) — never to plug a
          petit trou qu'on traverse simplement en marchant. */
       let shortfall, targetIsRaised, movingTowardSurface;
       if(fallSign>0){
@@ -1316,10 +1490,10 @@ function playResolve(dt){
   }
   if(P.x<0) P.x=0; if(P.x+P.w>W) P.x=W-P.w;
 
-  /* Sortie (tube) : solide sur les côtés — bloque comme un mur — mais son
-     dessus (l'ouverture, dans le sens opposé à la gravité) fait gagner dès
-     que le joueur y entre en tombant/sautant dedans. Même logique fallSign
-     que le reste de la fonction, même mécanique que le vrai jeu (engine.js). */
+  /* Exit (pipe): solid on the sides — blocks like a wall — but its top
+     (the opening, in the direction opposite to gravity) wins the level as
+     soon as the player enters it by falling/jumping in. Same fallSign logic
+     as the rest of the function, same mechanic as the real game (engine.js). */
   playResolveExit(fallSign, prevBottom, prevTop);
 }
 function playResolveExit(fallSign, prevBottom, prevTop){
@@ -1349,27 +1523,25 @@ function playResolveExit(fallSign, prevBottom, prevTop){
 }
 function playWin(){
   playMode="won";
-  showPlayMsg("⭐ Niveau terminé ! Relance automatique dans 2 secondes…");
-  setTimeout(()=>{ if(playRunning) playBuildLevel(); }, 2000);
+  setTimeout(()=>{ if(playRunning) playBuildLevel(); }, 1300);
 }
 let playPrevBox = null;
 function playUpdate(dt){
   playNow += dt*1000; playProcessTimers();
-  updatePlayClouds(dt);
   playPrevBox = { x:P.x, y:P.y, w:P.w, h:P.h };
 
-  /* Objets animés, avant la résolution des collisions (le joueur se tient
-     sur la position à jour d'une plateforme mobile ce tour-ci). */
+  /* Animated objects, before collision resolution (the player stands
+     on a moving platform's up-to-date position this frame). */
   for(const o of playObjects){
     o._lastDX = 0; o._lastDY = 0;
     if(o.state==="falling"){
       o.y += o.fallSpeed*dt; if(o.y>H+100){ o.visible=false; o.dead=true; }
     }
-    /* moveX et moveY sont deux "moteurs" indépendants (un par axe) : une
-       translation horizontale et une translation verticale peuvent tourner
-       EN PARALLÈLE sur le même objet (ex : MOVE droite pendant 1000ms +
-       MOVE haut décalé de 200ms => une diagonale), au lieu de s'écraser
-       l'une l'autre. */
+    /* moveX and moveY are two independent "engines" (one per axis): a
+       a horizontal move and a vertical move can tourner
+       IN PARALLEL on the same object (e.g. MOVE right for 1000ms +
+       MOVE up offset by 200ms => a diagonal), instead of overwriting
+       overwriting one another. */
     if(o.moveX || o.moveY){
       let dx=0, dy=0;
       if(o.moveX){
@@ -1382,28 +1554,50 @@ function playUpdate(dt){
       }
       o.x += dx; o.y += dy; o._lastDX += dx; o._lastDY += dy;
     }
+    if(o.moveTarget){
+      const mt = o.moveTarget;
+      const ddx = mt.tx-o.x, ddy = mt.ty-o.y;
+      const dist = Math.hypot(ddx,ddy);
+      if(dist<0.5){
+        o.x=mt.tx; o.y=mt.ty; o.moveTarget=null;
+        if(!o.moveX && !o.moveY) o.state="idle";
+      } else {
+        mt.speedCur = mt.accel ? approach(mt.speedCur, mt.speed, mt.accel*dt) : mt.speed;
+        const step = mt.speedCur*dt;
+        let sx,sy;
+        if(step>=dist){ o.x=mt.tx; o.y=mt.ty; o.moveTarget=null; if(!o.moveX && !o.moveY) o.state="idle"; sx=ddx; sy=ddy; }
+        else { const ux=ddx/dist, uy=ddy/dist; sx=ux*step; sy=uy*step; o.x+=sx; o.y+=sy; }
+        o._lastDX += sx; o._lastDY += sy;
+      }
+    }
     if(o.state==="rotating"){
       o.angle = (o.angle||0) + (o.rotateSpeed||0)*dt;
     }
+    if(o.kind==="button"){
+      const pressed = playOverlap(P,o);
+      o.pressPhase = approach(o.pressPhase||0, pressed?1:0, dt/0.12);
+    }
   }
 
-  P.vx = ((playInput.right?1:0)-(playInput.left?1:0)) * MOVE_SPEED;
+  P.vx = (playInput.right?1:0)-(playInput.left?1:0);
+  if(controlsInverted) P.vx = -P.vx;
+  P.vx *= currentMoveSpeed;
   if(P.vx>0) P.facing=1; else if(P.vx<0) P.facing=-1;
   walkPhase += Math.abs(P.vx)*dt*0.15;
   if(Math.abs(P.vx) < 1) walkPhase = 0;
   P.justJumped=false;
   if(playInput.jumpQueued && P.grounded){
-    /* Le saut pousse toujours à l'OPPOSÉ du sens de la gravité actuelle :
-       avec une gravité inversée (on est collé au plafond), sauter pousse
-       vers le bas, pas vers le haut. */
+    /* The jump always pushes OPPOSITE to the direction of current gravity:
+       with inverted gravity (stuck to the ceiling), jumping pushes
+       downward, not upward. */
     P.vy = currentGravity>=0 ? JUMP_VELOCITY : -JUMP_VELOCITY;
     P.grounded=false; P.groundedOn=null; P.justJumped=true;
   }
   playInput.jumpQueued=false;
 
   /* Impulsion externe (action MOVE ciblant PLAYER, cf. applyPlayerAction) :
-     s'ajoute au déplacement piloté par les touches, sans jamais l'écraser —
-     même logique à deux axes indépendants que pour les objets. */
+     adds to the movement driven by the keys, without ever overwriting it —
+     same two-independent-axis logic as for objects. */
   if(P.moveX){
     P.moveX.v = P.moveX.accel ? approach(P.moveX.v, P.moveX.target, P.moveX.accel*dt) : P.moveX.target;
     P.vx += P.moveX.v;
@@ -1413,13 +1607,13 @@ function playUpdate(dt){
     P.vy += P.moveY.v;
   }
 
-  /* Sous-pas physiques : à 240px/s et 60 img/s, une image déplace le joueur
-     de 4px, et son corps fait 26px de large — l'écart réel à traverser sans
-     aucun contact (largeur du trou moins largeur du joueur) est souvent
-     plus petit qu'un seul pas, donc franchi d'un coup avant que la gravité
-     n'ait eu le temps de s'accumuler. Recalculer la gravité et la collision
-     plusieurs fois par image (au lieu d'une fois avec le dt complet) donne
-     une chute d'apparence continue et détecte correctement les petits trous. */
+  /* Physics substeps: at 240px/s and 60 fps, one frame moves the player
+     4px, and their body is 26px wide — the real gap to cross without
+     no contact at all (gap width minus player width) is often
+     smaller than a single step, so it's crossed in one go before gravity
+     has had time to accumulate. Recomputing gravity and collision
+     several times per frame (instead of once with the full dt) gives
+     several times per frame gives a visually continuous fall and correctly detects small gaps. */
   const SUBSTEPS = 4;
   const subDt = dt / SUBSTEPS;
   for(let s=0; s<SUBSTEPS; s++){
@@ -1429,7 +1623,7 @@ function playUpdate(dt){
     playResolve(subDt);
   }
 
-  /* Portage par une plateforme mobile. */
+  /* Carried by a moving platform. */
   if(P.grounded && P.groundedOn){
     const platform = playObjects.find(o=>o.id===P.groundedOn);
     if(platform && (platform._lastDX || platform._lastDY)){
@@ -1450,8 +1644,8 @@ function playDeath(obj){
   playMode="dead"; playAttempts++;
   let cause=obj;
   if(!cause && P.lastBump && (playNow-P.lastBump.t)<1500) cause = playObjectsById[P.lastBump.id];
-  playLastCause = cause ? (cause.description||"Un piège t'a eu.") : "Tu es tombé dans le vide.";
-  showPlayMsg("💀 "+playLastCause+" (rejoue automatiquement…)");
+  playLastCause = cause ? (cause.description||"A trap got you.") : "You fell into the void.";
+  spawnDeathExplosion(P.x+P.w/2, P.y+P.h/2);
   setTimeout(()=>{ if(playRunning){ playBuildLevel(); } }, 1100);
 }
 function drawPlayObject(o){
@@ -1481,9 +1675,7 @@ function drawPlayObject(o){
       drawDoorShape(o.x,o.y,o.w,o.h, "#3d5af1", "#eef0ff", "#1f2d8a");
       break;
     case "button":
-      drawStoneBrick(o.x,o.y,o.w,o.h);
-      { const cx=o.x+o.w/2, cy=o.y+o.h/2, r=Math.min(o.w,o.h)*0.28;
-        ctx.fillStyle = o.state==="activated" ? "#4f8f6a" : "#8a6a3a"; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill(); }
+      drawButtonSpriteEd(o);
       break;
     case "sensor":
       ctx.fillStyle="rgba(61,90,241,.18)"; ctx.fillRect(o.x,o.y,o.w,o.h);
@@ -1497,10 +1689,10 @@ function drawPlayObject(o){
   }
   ctx.restore();
 }
-/* Personnage joueur : un simple bonhomme-bâton (tête ronde, tronc, bras,
-   jambes) qui s'anime à la marche et prend une pose différente en l'air —
-   dessiné en coordonnées LOCALES (origine = centre de la boîte du joueur,
-   déjà translatée/retournée par l'appelant selon P.facing). */
+/* Player character: a simple stick figure (round head, torso, arms,
+   legs) that animates while walking and takes a different pose in the air —
+   drawn in LOCAL coordinates (origin = center of the player's box,
+   already translated/flipped by the caller according to P.facing). */
 function drawStickFigure(w, h, grounded, phase, dead, speedFrac){
   const x = -w/2, y = -h/2;
   const headR = 5;
@@ -1517,7 +1709,7 @@ function drawStickFigure(w, h, grounded, phase, dead, speedFrac){
   ctx.strokeStyle = dead ? "#b8bccb" : "#2a2d3d";
   ctx.lineWidth = 2.4; ctx.lineCap = "round"; ctx.lineJoin = "round";
 
-  // tête
+  // head
   ctx.beginPath(); ctx.arc(midX, headCY, headR, 0, Math.PI*2);
   ctx.fillStyle = dead ? "#d7d9e4" : "#3d5af1"; ctx.fill(); ctx.stroke();
 
@@ -1537,10 +1729,10 @@ function drawStickFigure(w, h, grounded, phase, dead, speedFrac){
     ctx.beginPath(); ctx.moveTo(midX, hipY); ctx.lineTo(midX+9, hipY+8); ctx.lineTo(midX+5, footY); ctx.stroke();
   }
 }
-/* Ne renvoie que la zone jouable (entre les murs de bordure) : tout ce qui
-   est hors de cette zone (les murs eux-mêmes, et au-delà) reste en noir —
-   comme si les bornes étaient le cadre même de l'écran. Si un niveau n'a
-   pas (ou plus) ses murs par défaut, on retombe sur le monde 800x450 entier. */
+/* Only returns the playable area (between the boundary walls): everything that
+   is outside this zone (the walls themselves, and beyond) stays black —
+   as if the boundaries were the very frame of the screen. If a level doesn't
+   have (or no longer has) its default walls, falls back to the full 800x450 world. */
 function computePlayArea(){
   const top = playObjects.find(o=>o.id==="_boundTop");
   const left = playObjects.find(o=>o.id==="_boundLeft");
@@ -1548,9 +1740,9 @@ function computePlayArea(){
   const x0 = left ? left.x+left.w : 0;
   const y0 = top ? top.y+top.h : 0;
   const x1 = right ? right.x : W;
-  /* Pas de mur de bordure en bas (par design) — bande noire du bas purement
-     visuelle, calée sur l'épaisseur réelle du mur du haut pour rester
-     cohérente avec les trois autres côtés quel que soit le niveau. */
+  /* No boundary wall at the bottom (by design) — the bottom black bar is purely a
+     crop, aligned to the top wall's real thickness to stay
+     consistent with the other three sides regardless of the level. */
   const bottomMargin = top ? top.h : (left ? left.w : 20);
   const y1 = H - bottomMargin;
   return { x:x0, y:y0, w:Math.max(1,x1-x0), h:Math.max(1,y1-y0) };
@@ -1573,13 +1765,16 @@ function renderPlay(){
   drawExitSprite(ex.x,ex.y,ex.w,ex.h, playMode);
   for(const o of playObjects) drawPlayObject(o);
   drawPlayMario();
+  drawParticles();
   ctx.restore();
 }
-/* Sprite Mario si l'image est chargée, sinon repli sur la silhouette
-   bonhomme-bâton — même logique que render.js (dupliquée : contexte canvas
+/* Mario sprite if the image is loaded, otherwise falls back to the
+   stick-figure silhouette — same logic as render.js (duplicated: a different canvas context
    distinct `ctx`, variables `P`/`playMode` au lieu de `player`/`mode`). */
 function drawPlayMario(){
+  if(playMode==="dead") return;
   const facingRight = P.facing >= 0;
+  const sinkY = playerButtonSinkOffset();
   let img;
   if(!P.grounded){
     img = facingRight ? MARIO_SPRITES.jumpR : MARIO_SPRITES.jumpL;
@@ -1592,7 +1787,7 @@ function drawPlayMario(){
 
   if(!img || !img.complete || !img.naturalWidth){
     ctx.save();
-    ctx.translate(P.x+P.w/2, P.y+P.h/2); ctx.scale(P.facing, currentGravity<0 ? -1 : 1);
+    ctx.translate(P.x+P.w/2, P.y+P.h/2+sinkY); ctx.scale(P.facing, currentGravity<0 ? -1 : 1);
     drawStickFigure(P.w, P.h, P.grounded, walkPhase, playMode==="dead", Math.min(1, Math.abs(P.vx)/80));
     ctx.restore();
     return;
@@ -1603,7 +1798,7 @@ function drawPlayMario(){
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   if(playMode==="dead") ctx.globalAlpha = 0.55;
-  ctx.translate(P.x+P.w/2, P.y+P.h/2);
+  ctx.translate(P.x+P.w/2, P.y+P.h/2+sinkY);
   if(currentGravity<0) ctx.scale(1,-1);
   ctx.drawImage(img, -dw/2, P.h/2-dh, dw, dh);
   ctx.restore();
@@ -1613,28 +1808,30 @@ function playFrame(ts){
   if(!playRunning) return;
   if(playLastTs===null) playLastTs=ts;
   let dt=(ts-playLastTs)/1000; playLastTs=ts; if(dt>1/30) dt=1/30;
+  updateParticles(dt);
+  updatePlayClouds(dt);
   if(playMode==="playing") playUpdate(dt);
   renderPlay();
   requestAnimationFrame(playFrame);
 }
-const playOverlayMsg = document.getElementById("playOverlayMsg");
-function showPlayMsg(t){ playOverlayMsg.textContent=t; playOverlayMsg.classList.add("show"); }
-function hidePlayMsg(){ playOverlayMsg.classList.remove("show"); }
+const playOverlayMsg = null;
+function showPlayMsg(){}
+function hidePlayMsg(){}
 
 const btnPlay = document.getElementById("btnPlay");
 const playControlsEl = document.getElementById("playControls");
 function startPlay(){
-  /* Important : si le focus clavier est resté sur un champ du panneau de
-     propriétés (après avoir édité un paramètre), les flèches gauche/droite
-     iraient déplacer le curseur texte / la sélection de ce champ au lieu de
-     contrôler le joueur — ce qui donne l'impression que le jeu se bloque.
-     On retire explicitement le focus en entrant en mode test. */
+  /* Important: if keyboard focus stayed on a field in the properties
+     panel (after editing a parameter), the left/right arrows would
+     move that field's text cursor/selection instead of
+     controlling the player — which makes the game feel stuck.
+     Focus is explicitly removed when entering test mode. */
   if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
   playRunning = true; playAttempts=0; playLastTs=null;
   playBuildLevel();
   playControlsEl.classList.add("show");
   document.getElementById("showHiddenToggle").classList.add("show");
-  btnPlay.textContent = "■ Retour à l'édition";
+  btnPlay.textContent = "■ Back to editing";
   document.getElementById("palette").style.display="none";
   document.getElementById("inspector").style.display="none";
   resizeCanvasToContainer();
@@ -1645,7 +1842,7 @@ function stopPlay(){
   playControlsEl.classList.remove("show");
   document.getElementById("showHiddenToggle").classList.remove("show");
   hidePlayMsg();
-  btnPlay.textContent = "▶ Tester le niveau";
+  btnPlay.textContent = "▶ Test level";
   document.getElementById("palette").style.display="";
   document.getElementById("inspector").style.display="";
   resizeCanvasToContainer();
@@ -1665,11 +1862,11 @@ window.addEventListener("keyup",(e)=>{
   if(["ArrowLeft","q","Q"].includes(e.key)) playInput.left=false;
   if(["ArrowRight","d","D"].includes(e.key)) playInput.right=false;
 });
-/* setPointerCapture : seul un vrai relâchement du doigt (pointerup/cancel)
-   arrête la commande. Sans ça, le moindre tremblement qui sort du bouton
-   déclenche "pointerleave" et coupe la touche alors que le doigt est
-   toujours posé — combiné au long-press mobile qui tente de sélectionner
-   le texte du bouton, ça donnait l'impression que le jeu se bloquait. */
+/* setPointerCapture: only a real finger release (pointerup/cancel)
+   stops the command. Without this, the tiniest tremor that drifts
+   outside the button fires "pointerleave" and cuts the key while the
+   finger is still down — combined with mobile long-press trying to select
+   the button's text, this made the game feel like it was getting stuck. */
 function bindHold(elm, onDown, onUp){
   elm.addEventListener("pointerdown",(e)=>{
     e.preventDefault();
@@ -1692,7 +1889,7 @@ document.getElementById("btnTogglePalette").addEventListener("click", ()=>{
   document.getElementById("palette").classList.toggle("open");
 });
 
-/* ---------------------------- Démarrage ---------------------------- */
+/* ---------------------------- Startup ---------------------------- */
 document.getElementById("btnZoomIn").addEventListener("click", ()=>{ setZoom(view.zoom*1.25, canvas.width/2, canvas.height/2); render(); });
 document.getElementById("btnZoomOut").addEventListener("click", ()=>{ setZoom(view.zoom/1.25, canvas.width/2, canvas.height/2); render(); });
 document.getElementById("btnZoomReset").addEventListener("click", ()=>{ fitView(); render(); });
@@ -1701,12 +1898,13 @@ document.getElementById("btnPanMode").addEventListener("click", (e)=>{
   e.currentTarget.classList.toggle("active", panModeOn);
   canvas.style.cursor = panModeOn ? "grab" : "";
 });
-/* Redimensionnement de fenêtre "ordinaire" (bureau) : on garde le zoom/pan
-   actuels, juste la résolution du canvas qui suit. Un vrai changement
+/* "Ordinary" window resize (desktop): keeps the current zoom/pan,
+   just the canvas resolution follows. A genuine orientation
    d'ORIENTATION (portrait <-> paysage, typiquement en tournant le
-   téléphone — aussi bien en PWA installée qu'en onglet de navigateur
-   normal) recadre la vue à la nouvelle forme de l'écran, sinon le contenu
-   resterait mal cadré (trop zoomé, décalé) après la rotation. */
+   change (portrait <-> landscape, typically by rotating the
+   phone — whether in an installed PWA or a plain browser tab)
+   recrops the view to the screen's new shape, otherwise the content
+   would stay poorly framed (over-zoomed, offset) after rotating. */
 let lastOrientationPortrait = matchMedia("(orientation: portrait)").matches;
 function handleViewportChange(){
   const nowPortrait = matchMedia("(orientation: portrait)").matches;
@@ -1719,8 +1917,8 @@ function handleViewportChange(){
 }
 window.addEventListener("resize", handleViewportChange);
 window.addEventListener("orientationchange", ()=>{
-  // Sur certains navigateurs mobiles, les dimensions ne sont pas encore à
-  // jour au moment même de l'événement — un petit délai fiabilise la mesure.
+  // On some mobile browsers, the dimensions aren't updated yet
+  // at the exact moment of the event — a small delay makes the measurement reliable.
   setTimeout(handleViewportChange, 150);
 });
 

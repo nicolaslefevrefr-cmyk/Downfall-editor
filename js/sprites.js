@@ -1,8 +1,8 @@
 "use strict";
 /* =========================================================================
-   Sprites Mario — thème visuel du jeu. Images encodées en base64 pour que
-   le fichier reste autoportant (standalone) ; ce sont les mêmes images
-   que project/assets/*.png dans le projet complet.
+   Mario sprites — the game's visual theme. Images encoded in base64 so
+   the file stays self-contained (standalone); these are the same images
+   as project/assets/*.png in the full project.
    ========================================================================= */
 
 const SPRITE_BLOCK_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABOSURBVDhPY5jrzfh/jhcDVszIwPB/NhZxZHmGgTeAkZHxPwOIQS5GdgFIgJCN6PKDwACqhgE6xmYjuvwgMICqYQASIGQjuvwgMIDSMAAAD6yWMHqxvXUAAAAASUVORK5CYII=";
@@ -10,9 +10,9 @@ const SPRITE_BLOCK_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQ
 const MARIO_SPRITE_SRC = {
   idleL: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAgCAYAAAAbifjMAAABTUlEQVR4nK1UO27DMAwlBZ+hMHqJwukQOGNPURTdDC9Fz9PNW+FjZIxdIIlvEegUZoaAij6k4zh9kyCKj0/8IQig12eCcQzucLAovTXSJVRvKWmRExU5zSNQSJgoUOYMgmwN/ncyd3k4IQAA/Xw6om5ooSw+3NlhuB4dgXP0nGMw2a5qadNc1Gdx1PixRsYQkzjlwNhVQABeEvva0Cgk0VcSB9g0gHoZbzgzgu6ScqFFFgkYfW1o/fKeGppt0tJZ/KavDa33T9CNodTymEO3skEPAERV0BLpg7OfEMxxlkjMvc4xSVLG8pirTpLNLInuq0iqMEdJoEC8lZaJsmAw6b5mOx0yIpqchTkw+PWLYJbx4HcbTeMt+cKbRUsV4LpYzZQzDhZxsOIXeb2rn/fHFg8nNU8PVyHjCElLR3P/t7Lg23krPa6AI//bON+LM4Bst0SMPRIUAAAAAElFTkSuQmCC",
   walkL: [
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA4AAAAeCAYAAAAcni9KAAABEElEQVR4nJ2UMRrCIAyFX/x6CK6BWxk9hmtXj+PK2mM4tpu9Rm8RBwvFJFj0LQW+/I8EUghC7B3LNVpWkmsnuYDhopbYO5aGGqzAMhuqpVdTSrsrJ3y/ZoN5GdH7ax5nLe9PJwEVuCmZTMPIIYI6CZVBNRPAOJxaYKlpAFMaWAHlztLYvo4DKERQ7girVgmFiByvWkmZxMcOn9cMmyDwrrt/OszndU9/m4cIMmu0ICkTPIKmAaxA9o6/Qf3TAdhaDtgPpNYACfhI9egqpEIEnVogudtHqq2AAuk2EnvHPerBpVQDtLwGtKx2A7RIgdZT2AQmuGaQmuPQvay57KimtKwXoulwyh/4J9CC/7qOEEEvfECETZRx9iQAAAAASUVORK5CYII=",
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAdCAYAAACjbey/AAABD0lEQVR4nK2UsRGDMAxFpRxDsAZ0ocwYtLSMk5bWo0AXr+EtnIJYkWXLKHf5lU9Yz18yMoJQHPooY+gDyljSrYgsjyIUhz7WwHWAAlHdaR80yXI6HozPmUCHd3AfZlqTfA7sZGKR8FGC7YuL0wbkopPJfLMG4yqaeJVwugA6FGVAcyIPSGWgVr8lmRy0mshvgidmAA6p3sCrPyFjKCDURFyd+r8fYyCQ7Fd2C7g6rNnkEKniGvcFYrJsUX2Y4Fv3TwBZH4ektSyxuzr5yknmINusvAlSmR3ru8DfBLWJVv0X0Hp9k44xlOMs1eqF/COrJaAPaHGjAjhImwHaYzkl1TxtgM1ptGjaQJ1YkwsZewOtEIe2dLcYewAAAABJRU5ErkJggg==",
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAeCAYAAAAl+Z4RAAABGElEQVR4nJWUuxXDIAxFRQ5DsAbunDJjuPVKad16jJR2Z9ZgC1IkEKEPEFWxwrt6FrIMkEjeJZozIRqay3FjmfXBUsm7JIFlgAJR3Wl/aEFfx+Jkei4FdIYdZr+U3yVCDbRUyATfyLBj3dN9g+LCUjE+rMFwsCb2BB8XUIoamtCc0AL5NeRrHBQXBwC8kZIYCxkARwXbXj/IFBlEnfFjhTRfDs4pllx+xhCxB5JYCwbQbgQARKDoYL5ct7IIoNU1ED7HHFBRz00FqA6jncCgfilXrU4ivn8MoRNazcHQYiHbqnLQWp6aMyYYcYELsR4MuUAhNtGEaDQQnUb9FgQ3WYwHyfYsmhBN6/toOsghLZK/AC3IMECDvQFGOIfLV0JREwAAAABJRU5ErkJggg==",
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAgCAYAAAAbifjMAAABPklEQVR4nJ1UsRGDMAx8+RiCNZIOyoxB65Zx0tJ6jJTQwRps4RTBRJYlIPkKhP8tPZIICuKtjjJGy0raWacF4R+qqCasCxgiWnZkfTgCL6eSwfjsdqFpCWhu3f68Y/k+7gKcWBA2JLHRh9gOn+wrjcwPW2IJqolHhITRIwLMxBQ4ykRe0A4g+zeekBOy7tK8sG5WBTQxfiMnZgLx2UXqQ9ZU0339lDHXOUHMBPG0qQ+kkdO7lklmIv8TFlmeywSauVYJGpKISyZdaR4Nrh1AR2RpYiEAMFO2HdDMdbYPLJHRI+aNdGEnSI8q45wO/0AjQs4aoqtwgD2JBYZXEdpLGD3iBL19LVAf6CcPpvuKZnhl83C4Dwrylhkv+TQDayqTiCrAU4zIe0P2gblQJPiY/yWQwOs/XapX8JOAvB0A3qwdprRu+TFCAAAAAElFTkSuQmCC",
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA4AAAAfCAYAAADXwvzvAAABG0lEQVR4nI1UuxWDMAyUeAzBGtBBmTFoWSktbcZICV1Yw1s4RZCefJYC12D0dDr9bCZA7ruMNj4So61BAy2PypT7LmPAmhiQMRuO0osgabf2Jz9nDbAfLxr7Wc+K4/dpkVA5npAg2/LK00rcIsk6RUGInOZEjhbbQpnl4DlYZQzsj+OCNK3EuhFerRGJ6JwjQoOs78JuV68iSr3jp/spDYnkfx+SKro1IknO46fTwAUx6q6HSlHUrtBWlvNmXC1CoWhn583RJd69WlJKc5eEtZfNgYFHJKLgBbBD98BH4kYOSIogvkoIr5ZRtQJao+wgIsqgaI5HFkV8lIvNsenaFPch6evmEq3ytqS/s3XrQnUbMFS8e7XcVP8pCb5EpY2wuG8zCgAAAABJRU5ErkJggg==",
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAeCAYAAAAl+Z4RAAABJUlEQVR4nJ1VO5aDMAwc5/kQvgZ0pNxjpPWVtqXNMVKaDq7BLZQia8fWx/jtVEYwo7GkJxwYaArEY+44HY9l3EQk/ogQTYE0YV3AEDHdWS8s8Ov4Oki/jyK0HU8s06OcC45W0HOiIPwhi6X4pPuK4sJzcv2xJVZDFPGK8HGBktTxgOWEJ8jX0Ns4SC4OAFlIjVwThUCNRmx9fUXmU4iYM54iaNkDtvkssfxci6g10MgWvLC9voAdXXKKKMMkBukqK3dmtlEjamgERqYQwHURR7MDrI00BeJtU0nVTvD8ZS+bhrYGA30XbvIhr7VtPrsueBJRxNznUTdFoC7MsgcxMJcCGu4rXO+nArAuiIyHdJfmdnsNj3LtSkxiiiBrL/aE/uWAi7wB7weXi6fKEqAAAAAASUVORK5CYII=",
   ],
   jumpL: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAfCAYAAADupU20AAABPElEQVR4nJVVvbmEIBAc+CjCNryMC68MU9Mr56WmlPFCzaQNu+AF5/KWZUFvIlR2ZvYHNACQfqaEE+YdDL6ApeAtBkiyO3A8mJDGoSIx8VCdOQDw43SpRKSSyKwzKjW/D10yTuLuBrWQCbbH8SFi6Wwx5OeiTlEhuFMH2rPOIT0XGACwvWBVXcBqL3sBEuZjqe6EdKEJPBcY29so320xVO4c/3inkKRMazUFvw//bRXzUU0iLTgJEVAwkWlOqi5w9V4wiWYCnpdmvYXCgVTX4MepKHaZwvyq1Is1C6R1Ybu4SOYXsPzmx+1xqG1uE2g4HXLY3hhX4I7OibRA/yy0SPw4wbyDqa60O+3j06ge5x5km11jXzPQ7wPW+ciuLwlah+qSgPJM6LfWyTMA9EdZ4rKIrV9a/v6VHAO1/w8ORZJ5+cPBqwAAAABJRU5ErkJggg==",
   idleR: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAgCAYAAAAbifjMAAABXElEQVR4nK1VQW6DMBCctXhDhfKJiuTknqq+okK9VCiXKs+Jesut4hk9khza+BcVr2B7IHZsvAZCuyewd2Zn8XghJII3K0bXBWtkWhrmKQnIRR6BUT2JhQICqeoYGAACSUkCCXhpJ/MXj+sWlkAXZb9mavcMALSrg6KuhWarWN8/B8mO2NRXlfuSeV9yRJAC6aIUSS2JAoDTVk327qvwgyxB13WT8v14OPRYNZUskUYKbDSXViZB3klE1uTNivH6GIGOpnaykwqsCv1113vCC33OcVy3EYkagqdOo6nA/ntgpLk29klm+yBFEjlRn/MkSNpT1kRLoqnAWWpzTEmgQFyVBkhiqBC/v4Qf8PA5XnJAlLzOc0PR2wdBLeOhXU0hckq+kON8fctABa5DVY2BybREphVb5CKXnTisAAD0/ZP8Tn8+hcxWiG6jCRP9fwaQmImLFLjL9F/X+db4BQb6rcXj4yYJAAAAAElFTkSuQmCC",
@@ -24,9 +24,9 @@ const MARIO_SPRITE_SRC = {
   jumpR: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAgCAYAAAAbifjMAAABqElEQVR4nJ1VS26DMBScZ+UMFcopAlnBqsopItRNxbbHYYu6i6KeoeoyXiXkFBHKIfy6ADvPYBPaWRnZM2/eB5sQAW/XDGOCe9R25NZ2caoUAwb5JYlpAu87QAH0cXA8JclLIMnOAddvDBjo9gAAyNMSAKDbI/LLy2waypIl0UP1ClQ76Ozu1lAApwm7FJZCt0cABnTuyDl4bA72r4krR57uodsvAAZ5uh8cKnBdMtflw4FuD8jTshcxAD5/PBEbxzqw4LpkkgW0LdRZ55HHRCnqtYS3a9abW/BgyEHRgEiSYYyLLjEWAh7z4AnY6LKdNqqcUBukaECTNo5nIU/3fWdGZItFc6A392BqXgoWcjKdwKh4QQe8XTOnCaP5Bsw8Kehg8v8Pv+4zobiATCGSv5cCnW8EFa7p3CUzKaK8XEJE6cabxJjInAtqO1qFScuuNwBYyY/xFMoO6KzzXNgLxRMYo/+JfCF5pQOhSZyZh6Ixk/N0qhTbjaWPicTwLoCBfhZ0dl9Mdg5iVbdFmxXoHcRFimZaJwnVHzL0xyfCF4iJPIvuCfzXyS+poe3hCmm+1wAAAABJRU5ErkJggg==",
 };
 
-/* Chargement asynchrone (les Image() se peuplent en arrière-plan ; le rendu
-   vérifie .complete avant de dessiner et retombe sur le rendu vectoriel
-   existant tant que ce n'est pas prêt — donc aucun flash blanc/cassé). */
+/* Asynchronous loading (the Image() objects populate in the background;
+   rendering checks .complete before drawing and falls back to the
+   existing vector rendering until it's ready — so no white/broken flash). */
 const SPRITE_BLOCK = new Image(); SPRITE_BLOCK.src = SPRITE_BLOCK_SRC;
 function loadSpriteSet(srcSet){
   const out = {};
@@ -39,9 +39,9 @@ function loadSpriteSet(srcSet){
 }
 const MARIO_SPRITES = loadSpriteSet(MARIO_SPRITE_SRC);
 
-/* Plante piranha (2 frames, alternance automatique) — remplace les pics.
-   Nuages + couleur de ciel — remplacent le fond uni.
-   Tube — remplace la porte de sortie. */
+/* Piranha plant (2 frames, automatic alternation) — replaces spikes.
+   Clouds + sky color — replace the flat background.
+   Pipe — replaces the exit door. */
 const SKY_COLOR = "rgb(92,148,252)";
 const PLANT_SPRITE_SRC = [
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAWCAYAAADJqhx8AAABKElEQVR4nI1ToXHEQAxc3QQaPnx3ERgQaJACAh58CS4g8Av4EgIMUoCB4QPDdHGBgeYKcPZGJ995LOSRtKtdnQz8x/l2UhwM2xuYiE0HnUfVeawSsR6bLpEEFttlAgDIy5vUCFhjbyKITbeSPK5VFcy3jyssRqyf2HTA83tVhc6j4vsrUyB6v6hNAEB8/cwkUxGn24GBYEryfv13ZnmZtkssAXyuukTG+XbKFqnzqP5OiAme0ZOVQBazLqmwSAD4+fgVKiqRST9IpmBvuldBTLCTalZK0onJts1/omSHRO0yJfCGoEZUAiYCvV8UAKQfNsUjtSf62msuAdtlWk9Z+kGsXDYcAadntD5rJB7MCFb23gt4MDHBN5HEquCllg4tW9ie/wxkFv0H02/cwC0mL2sAAAAASUVORK5CYII=",
@@ -57,3 +57,12 @@ const TUBE_SPRITE_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgC
 const PLANT_SPRITES = PLANT_SPRITE_SRC.map(s => { const im = new Image(); im.src = s; return im; });
 const CLOUD_SPRITES = CLOUD_SPRITE_SRC.map(s => { const im = new Image(); im.src = s; return im; });
 const SPRITE_TUBE = new Image(); SPRITE_TUBE.src = TUBE_SPRITE_SRC;
+
+/* Button (bump.png, 3 frames: released / half-pressed / pressed) — replaces
+   l'ancien rendu pierre+pastille. */
+const BUMP_SPRITE_SRC = [
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAYCAYAAADzoH0MAAAAR0lEQVR4nGP8YcHwn4ECwESJZtqB/wtcMLyFTYyBgQpeoH4Y4HIqLrlB5gV8zselZpAmJLLB4AiDIZ6QYGCIZ2dSAeOAl8oAd90nEVNSSSUAAAAASUVORK5CYII=",
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAARklEQVR4nGP8YcHwn4ECwESJZtqB/wtcMLyFTYyBAYsXcCkkJAdXQMgAnPKENJOqbgAAVbxAUSASUkRS4JGSkCgGjAOeGwE0sU9bwsBRCgAAAABJRU5ErkJggg==",
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAICAYAAADwdn+XAAAAM0lEQVR4nGP8YcHwn4ECwESJZgYGBgZGBgYGhv8LXDBcwZiwhxGZT4yagQEUe4FxwGMBAPNUFGcNbTslAAAAAElFTkSuQmCC",
+];
+const BUMP_SPRITES = BUMP_SPRITE_SRC.map(s => { const im = new Image(); im.src = s; return im; });

@@ -1,15 +1,15 @@
 "use strict";
 /* =========================================================================
-   Firebase — petite couche REST partagée par l'éditeur et le jeu.
-   Utilise l'API REST de la Realtime Database (de simples fetch(), pas de
-   SDK) : chaque niveau est stocké sous /levels/{id}.json, avec un champ
-   "status" ("PRODUCTION" ou "FINAL") qui détermine si le jeu doit le
+   Firebase — small REST layer shared by the editor and the game.
+   Uses the Realtime Database's REST API (plain fetch(), no
+   SDK): each level is stored under /levels/{id}.json, with a
+   "status" field ("PRODUCTION" or "FINAL") that determines whether the game should
    proposer aux joueurs.
    ========================================================================= */
 
-/* Les réglages de connexion viennent uniquement de js/firebase-config.js —
+/* Connection settings come only from js/firebase-config.js —
    pas de surcouche modifiable depuis l'interface. Pour changer de base, on
-   modifie ce fichier directement avant de déployer. */
+   edit this file directly before deploying. */
 function getFirebaseSettings(){
   return {
     databaseURL: (typeof FIREBASE_CONFIG!=="undefined" ? FIREBASE_CONFIG.databaseURL : "") || "",
@@ -25,38 +25,46 @@ function firebaseUrl(path, settings){
   return url;
 }
 
-/* Liste tous les niveaux stockés (objet {id: {...niveau, status, updatedAt}}). */
+/* Lists all stored levels (object {id: {...level, status, updatedAt}}). */
 async function firebaseListLevels(settings){
   const s = settings || getFirebaseSettings();
-  if(!s.databaseURL) throw new Error("Aucune base de données configurée (onglet Paramètres).");
+  if(!s.databaseURL) throw new Error("No database configured (see js/firebase-config.js).");
   const res = await fetch(firebaseUrl("/levels", s));
-  if(!res.ok) throw new Error("Erreur Firebase (" + res.status + ")");
+  if(!res.ok) throw new Error("Firebase error (" + res.status + ")");
   const data = await res.json();
   return data || {};
 }
 
-/* Sauvegarde (crée ou remplace) un niveau, avec son statut. */
+/* Saves (creates or replaces) a level, with its status. */
 async function firebaseSaveLevel(level, status, settings){
   const s = settings || getFirebaseSettings();
-  if(!s.databaseURL) throw new Error("Aucune base de données configurée (onglet Paramètres).");
-  if(!level.id) throw new Error("Le niveau doit avoir un identifiant.");
+  if(!s.databaseURL) throw new Error("No database configured (see js/firebase-config.js).");
+  if(!level.id) throw new Error("The level must have an identifier.");
   const payload = Object.assign({}, level, { status: status, updatedAt: Date.now() });
   const res = await fetch(firebaseUrl("/levels/" + encodeURIComponent(level.id), s), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if(!res.ok) throw new Error("Erreur Firebase (" + res.status + ")");
+  if(!res.ok) throw new Error("Firebase error (" + res.status + ")");
   return payload;
 }
 
-/* Charge un seul niveau par id. */
+/* Loads a single level by id. */
 async function firebaseLoadLevel(id, settings){
   const s = settings || getFirebaseSettings();
-  if(!s.databaseURL) throw new Error("Aucune base de données configurée (onglet Paramètres).");
+  if(!s.databaseURL) throw new Error("No database configured (see js/firebase-config.js).");
   const res = await fetch(firebaseUrl("/levels/" + encodeURIComponent(id), s));
-  if(!res.ok) throw new Error("Erreur Firebase (" + res.status + ")");
+  if(!res.ok) throw new Error("Firebase error (" + res.status + ")");
   const data = await res.json();
-  if(!data) throw new Error("Niveau introuvable.");
+  if(!data) throw new Error("Level not found.");
   return data;
+}
+
+/* Deletes a level. */
+async function firebaseDeleteLevel(id, settings){
+  const s = settings || getFirebaseSettings();
+  if(!s.databaseURL) throw new Error("No database configured (see js/firebase-config.js).");
+  const res = await fetch(firebaseUrl("/levels/" + encodeURIComponent(id), s), { method: "DELETE" });
+  if(!res.ok) throw new Error("Firebase error (" + res.status + ")");
 }
