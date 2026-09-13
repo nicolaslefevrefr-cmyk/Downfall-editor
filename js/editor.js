@@ -244,11 +244,11 @@ function drawObjectEditor(o, isSelected){
       if(BUMP_SPRITES[0].complete && BUMP_SPRITES[0].naturalWidth){
         const img = BUMP_SPRITES[0];
         ctx.imageSmoothingEnabled = false;
-        const scale = GRID/img.naturalWidth, dw=GRID, dh=img.naturalHeight*scale;
+        const dh = BUTTON_FRAME_H[0];
         const n = Math.max(1, Math.round(o.w/GRID));
         for(let i=0;i<n;i++){
           const cx = o.x + i*GRID + GRID/2;
-          ctx.drawImage(img, cx-dw/2, o.y+o.h-dh, dw, dh);
+          ctx.drawImage(img, cx-GRID/2, o.y+o.h-dh, GRID, dh);
         }
       } else {
         drawStoneBrick(o.x,o.y,o.w,o.h);
@@ -421,46 +421,44 @@ function drawClouds(){
 
 /* Test-mode button (bump.png, 3 frames) — same logic as the game
    (render.js), duplicated here (separate `ctx` canvas context). One frame
-   per grid unit of width, all sharing the same pressPhase. */
-function buttonFrameForPhase(phase){
-  return phase<0.34 ? BUMP_SPRITES[0] : (phase<0.67 ? BUMP_SPRITES[1] : BUMP_SPRITES[2]);
+   per grid unit of width, all sharing the same pressPhase. Fixed target
+   sizes (not the source image's native aspect ratio): released = a full
+   20x20 tile, easing down to a visibly shorter — but still clearly a
+   button, not a sliver — size once fully pressed. */
+const BUTTON_FRAME_H = [20, 15, 12];
+function buttonFrameIndexForPhase(phase){
+  return phase<0.34 ? 0 : (phase<0.67 ? 1 : 2);
 }
 function drawButtonSpriteEd(o){
-  const phase = o.pressPhase || 0;
-  const img = buttonFrameForPhase(phase);
+  const idx = buttonFrameIndexForPhase(o.pressPhase || 0);
+  const img = BUMP_SPRITES[idx];
   const n = Math.max(1, Math.round(o.w/GRID));
+  const dh = BUTTON_FRAME_H[idx];
   if(!img || !img.complete || !img.naturalWidth){
     const cw = o.w/n;
     for(let i=0;i<n;i++){
       const sx = o.x+i*cw;
-      drawStoneBrick(sx,o.y,cw,o.h);
-      const cx=sx+cw/2, cy=o.y+o.h/2, r=Math.min(cw,o.h)*0.28;
-      ctx.fillStyle = phase>0.5 ? "#4f8f6a" : "#8a6a3a";
+      drawStoneBrick(sx,o.y+(o.h-dh),cw,dh);
+      const cx=sx+cw/2, cy=o.y+o.h-dh/2, r=Math.min(cw,dh)*0.28;
+      ctx.fillStyle = idx>0 ? "#4f8f6a" : "#8a6a3a";
       ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
     }
     return;
   }
   ctx.imageSmoothingEnabled = false;
-  const scale = GRID/img.naturalWidth, dw=GRID, dh=img.naturalHeight*scale;
   for(let i=0;i<n;i++){
     const cx = o.x + i*GRID + GRID/2;
-    ctx.drawImage(img, cx-dw/2, o.y+o.h-dh, dw, dh);
+    ctx.drawImage(img, cx-GRID/2, o.y+o.h-dh, GRID, dh);
   }
 }
-/* Visual sink, computed from the actual sprite geometry (same as the
-   game's render.js) rather than a guessed constant. */
+/* Visual sink, tied to the same fixed BUTTON_FRAME_H targets used for
+   drawing (same as the game's render.js). */
 function playerButtonSinkOffset(){
-  const img0 = BUMP_SPRITES[0];
-  if(!img0.complete || !img0.naturalWidth) return 0;
-  const scale = GRID/img0.naturalWidth;
-  const dh0 = img0.naturalHeight*scale;
   let maxSink = 0;
   for(const o of playObjects){
     if(o.kind!=="button" || !(o.pressPhase>0) || !playOverlap(P,o)) continue;
-    const imgCur = buttonFrameForPhase(o.pressPhase);
-    if(!imgCur.complete || !imgCur.naturalWidth) continue;
-    const dhCur = imgCur.naturalHeight*scale;
-    const sink = dh0 - dhCur;
+    const idx = buttonFrameIndexForPhase(o.pressPhase);
+    const sink = BUTTON_FRAME_H[0] - BUTTON_FRAME_H[idx];
     if(sink>maxSink) maxSink = sink;
   }
   return maxSink;
@@ -1463,65 +1461,93 @@ function effectiveBox(o){
 }
 function playResolve(dt){
   /* fallSign = direction of current gravity (1 = normal, -1 = inverted).
-     All the resolution below is symmetric with respect to this sign:
-     with inverted gravity, "landing" means sticking to the UNDERSIDE
-     from a platform (the ground is at the ceiling), and the jump catch-up
-     applies toward a lower platform (in the direction opposite to
-     gravity) rather than a higher one. */
+     Same design as the game's engine.js: both axes move first, then two
+     purpose-built checks resolve them in this order —
+       1. VERTICAL landing, decided purely by the player's bottom-center
+          point, using this frame's ALREADY-UPDATED x.
+       2. HORIZONTAL walls, full-body edge overlap — skipping whatever
+          object the point above just landed on. */
   const fallSign = currentGravity >= 0 ? 1 : -1;
-  const prevBottom=P.y+P.h, prevTop=P.y;
-  P.x += P.vx*dt; P.y += P.vy*dt;
-  P.grounded=false; P.groundedOn=null;
+  const prevBottom = P.y + P.h;
+  const prevTop = P.y;
+  const prevY = P.y;
+  P.grounded = false; P.groundedOn = null;
+
+  P.x += P.vx*dt;
+  P.y += P.vy*dt;
+
+  /* ---------------------------- 1. Vertical landing ---------------------------- */
   for(const o of playObjects){
-    /* An invisible object doesn't block physically by default (otherwise
-       a trap the player successfully avoided would keep getting in the
-       way) — unless "Solid even hidden" is explicitly checked. */
     if(!o.solid) continue;
     if(o.visible===false && !o.solidWhenHidden) continue;
     const box = effectiveBox(o);
     if(!playOverlap(P,box)) continue;
-
     if(fallSign>0){
-      if(P.vy>=0 && prevBottom<=box.y+2){ P.y=box.y-P.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y; continue; }
-      if(P.vy<0 && prevTop>=box.y+box.h-2){ P.y=box.y+box.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; continue; }
+      if(P.vy<0 && prevTop>=box.y+box.h-2){ P.y=box.y+box.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
     } else {
-      if(P.vy<=0 && prevTop>=box.y+box.h-2){ P.y=box.y+box.h; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y+box.h; continue; }
-      if(P.vy>0 && prevBottom<=box.y+2){ P.y=box.y-P.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; continue; }
-    }
-
-    const overlapX = Math.min(P.x+P.w,box.x+box.w)-Math.max(P.x,box.x);
-    const overlapY = Math.min(P.y+P.h,box.y+box.h)-Math.max(P.y,box.y);
-    if(overlapX<overlapY){
-      /* Step-up assist: measured against the position BEFORE this frame's movement
-         (measured against the position before this frame's movement), and only for climbing onto a platform
-         noticeably closer to the "effective ceiling" than the one just
-         (a jump that's just barely too short) — never to plug a
-         petit trou qu'on traverse simplement en marchant. */
-      let shortfall, targetIsRaised, movingTowardSurface;
-      if(fallSign>0){
-        shortfall = prevBottom - box.y;
-        targetIsRaised = P.lastGroundY==null || box.y < P.lastGroundY - 2;
-        movingTowardSurface = P.vy>=0;
-      } else {
-        shortfall = (box.y+box.h) - prevTop;
-        targetIsRaised = P.lastGroundY==null || (box.y+box.h) > P.lastGroundY + 2;
-        movingTowardSurface = P.vy<=0;
-      }
-      if(targetIsRaised && shortfall>0 && shortfall<=STEP_UP && movingTowardSurface){
-        if(fallSign>0){ P.y=box.y-P.h; P.lastGroundY=box.y; } else { P.y=box.y+box.h; P.lastGroundY=box.y+box.h; }
-        P.vy=0; P.grounded=true; P.groundedOn=o.id;
-      }
-      else { if(P.x<box.x) P.x-=overlapX; else P.x+=overlapX; P.vx=0; }
-    } else {
-      if(fallSign>0){
-        if(P.y<box.y){ P.y-=overlapY; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y; }
-        else { P.y+=overlapY; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
-      } else {
-        if(P.y+P.h>box.y+box.h){ P.y+=overlapY; P.vy=0; P.grounded=true; P.groundedOn=o.id; P.lastGroundY=box.y+box.h; }
-        else { P.y-=overlapY; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
-      }
+      if(P.vy>0 && prevBottom<=box.y+2){ P.y=box.y-P.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
     }
   }
+
+  const footX = P.x + P.w/2;
+  const footY = fallSign>0 ? P.y+P.h : P.y;
+  const fallingThisFrame = fallSign>0 ? P.vy>=0 : P.vy<=0;
+  let landedOnId = null;
+  if(fallingThisFrame){
+    let bestSurface=null, bestObj=null;
+    const catchWindow = Math.max(6, Math.abs(P.vy*dt)+2);
+    for(const o of playObjects){
+      if(!o.solid) continue;
+      if(o.visible===false && !o.solidWhenHidden) continue;
+      const box = effectiveBox(o);
+      if(footX<box.x || footX>box.x+box.w) continue;
+      const surfaceY = fallSign>0 ? box.y : box.y+box.h;
+      const reached = fallSign>0
+        ? (footY>=surfaceY-0.5 && footY<=surfaceY+catchWindow)
+        : (footY<=surfaceY+0.5 && footY>=surfaceY-catchWindow);
+      if(!reached) continue;
+      if(bestSurface===null || (fallSign>0 ? surfaceY<bestSurface : surfaceY>bestSurface)){
+        bestSurface=surfaceY; bestObj=o;
+      }
+    }
+    if(bestObj){
+      if(fallSign>0) P.y=bestSurface-P.h; else P.y=bestSurface;
+      P.vy=0; P.grounded=true; P.groundedOn=bestObj.id; P.lastGroundY=bestSurface;
+      landedOnId = bestObj.id;
+    }
+  }
+
+  /* ---------------------------- 2. Horizontal walls + step-up ---------------------------- */
+  for(const o of playObjects){
+    if(!o.solid) continue;
+    if(o.visible===false && !o.solidWhenHidden) continue;
+    if(o.id===landedOnId) continue;
+    const box = effectiveBox(o);
+    const hOverlap = P.x < box.x+box.w && P.x+P.w > box.x;
+    const vOverlap = prevY < box.y+box.h && prevY+P.h > box.y;
+    if(!hOverlap || !vOverlap) continue;
+
+    let shortfall, targetIsRaised;
+    if(fallSign>0){
+      shortfall = prevBottom - box.y;
+      targetIsRaised = P.lastGroundY==null || box.y < P.lastGroundY - 2;
+    } else {
+      shortfall = (box.y+box.h) - prevTop;
+      targetIsRaised = P.lastGroundY==null || (box.y+box.h) > P.lastGroundY + 2;
+    }
+    if(targetIsRaised && shortfall>0 && shortfall<=STEP_UP){
+      if(fallSign>0){ P.y=box.y-P.h; P.lastGroundY=box.y; } else { P.y=box.y+box.h; P.lastGroundY=box.y+box.h; }
+      P.vy=0; P.grounded=true; P.groundedOn=o.id;
+      const minCenterInside = 1;
+      if(P.x+P.w/2 < box.x+minCenterInside) P.x = box.x+minCenterInside-P.w/2;
+      else if(P.x+P.w/2 > box.x+box.w-minCenterInside) P.x = box.x+box.w-minCenterInside-P.w/2;
+      continue;
+    }
+    if(shortfall<=0) continue;
+    if(P.x<box.x) P.x = box.x-P.w; else P.x = box.x+box.w;
+    P.vx = 0;
+  }
+
   if(P.x<0) P.x=0; if(P.x+P.w>W) P.x=W-P.w;
 
   /* Exit (pipe): solid on the sides — blocks like a wall — but its top
@@ -1529,26 +1555,6 @@ function playResolve(dt){
      soon as the player enters it by falling/jumping in. Same fallSign logic
      as the rest of the function, same mechanic as the real game (engine.js). */
   playResolveExit(fallSign, prevBottom, prevTop);
-
-  /* Chute au centre plutôt qu'au coin arrière — même correctif que le jeu
-     (engine.js) : le joueur perd "grounded" dès que son point central
-     n'a plus de support, même si sa boîte complète chevauche encore. */
-  if(P.grounded){
-    const centerX = P.x + P.w/2;
-    const checkY = fallSign > 0 ? P.y + P.h + 1 : P.y - 1;
-    let supported = false;
-    for(const o of playObjects){
-      if(!o.solid) continue;
-      if(o.visible === false && !o.solidWhenHidden) continue;
-      const box = effectiveBox(o);
-      if(centerX >= box.x && centerX <= box.x+box.w && checkY >= box.y && checkY <= box.y+box.h){ supported = true; break; }
-    }
-    if(!supported){
-      const e = curLevel().exit;
-      if(centerX >= e.x && centerX <= e.x+e.w && checkY >= e.y && checkY <= e.y+e.h) supported = true;
-    }
-    if(!supported){ P.grounded = false; P.groundedOn = null; }
-  }
 }
 function playResolveExit(fallSign, prevBottom, prevTop){
   const e = curLevel().exit;
