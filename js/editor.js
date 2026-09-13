@@ -453,15 +453,19 @@ function drawButtonSpriteEd(o){
 }
 /* Visual sink, tied to the same fixed BUTTON_FRAME_H targets used for
    drawing (same as the game's render.js). */
+/* Visual offset for the player while standing on a button — raises them
+   to match the button's current (compressing) height, never lowers them
+   below the actual solid platform's surface. Same logic as the game's
+   render.js. */
 function playerButtonSinkOffset(){
-  let maxSink = 0;
+  let maxH = 0;
   for(const o of playObjects){
-    if(o.kind!=="button" || !(o.pressPhase>0) || !playOverlap(P,o)) continue;
-    const idx = buttonFrameIndexForPhase(o.pressPhase);
-    const sink = BUTTON_FRAME_H[0] - BUTTON_FRAME_H[idx];
-    if(sink>maxSink) maxSink = sink;
+    if(o.kind!=="button" || !playOverlap(P,o)) continue;
+    const idx = buttonFrameIndexForPhase(o.pressPhase || 0);
+    const h = BUTTON_FRAME_H[idx];
+    if(h>maxH) maxH = h;
   }
-  return maxSink;
+  return -maxH;
 }
 
 /* Player death explosion (same logic as the game, render.js). */
@@ -1471,17 +1475,25 @@ function playResolve(dt){
   const prevBottom = P.y + P.h;
   const prevTop = P.y;
   const prevY = P.y;
+  const wasGrounded = P.grounded;
   P.grounded = false; P.groundedOn = null;
 
   P.x += P.vx*dt;
   P.y += P.vy*dt;
 
   /* ---------------------------- 1. Vertical landing ---------------------------- */
+  /* Ceiling/floor bump — horizontally NARROWED (each side pulled 25% of
+     the half-width toward the center): using the exact corners made a
+     jump fail whenever a platform directly above was offset by just a
+     mismatched pixel or two. */
+  const bumpInset = (P.w/2) * 0.25;
+  const bumpLeft = P.x + bumpInset, bumpRight = P.x + P.w - bumpInset;
   for(const o of playObjects){
     if(!o.solid) continue;
     if(o.visible===false && !o.solidWhenHidden) continue;
     const box = effectiveBox(o);
-    if(!playOverlap(P,box)) continue;
+    if(bumpRight<=box.x || bumpLeft>=box.x+box.w) continue;
+    if(P.y>=box.y+box.h || P.y+P.h<=box.y) continue;
     if(fallSign>0){
       if(P.vy<0 && prevTop>=box.y+box.h-2){ P.y=box.y+box.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
     } else {
@@ -1535,7 +1547,7 @@ function playResolve(dt){
       shortfall = (box.y+box.h) - prevTop;
       targetIsRaised = P.lastGroundY==null || (box.y+box.h) > P.lastGroundY + 2;
     }
-    if(targetIsRaised && shortfall>0 && shortfall<=STEP_UP){
+    if(wasGrounded && targetIsRaised && shortfall>0 && shortfall<=STEP_UP){
       if(fallSign>0){ P.y=box.y-P.h; P.lastGroundY=box.y; } else { P.y=box.y+box.h; P.lastGroundY=box.y+box.h; }
       P.vy=0; P.grounded=true; P.groundedOn=o.id;
       const minCenterInside = 1;
@@ -1543,7 +1555,7 @@ function playResolve(dt){
       else if(P.x+P.w/2 > box.x+box.w-minCenterInside) P.x = box.x+box.w-minCenterInside-P.w/2;
       continue;
     }
-    if(shortfall<=0) continue;
+    if(shortfall<=STEP_UP) continue;
     if(P.x<box.x) P.x = box.x-P.w; else P.x = box.x+box.w;
     P.vx = 0;
   }
