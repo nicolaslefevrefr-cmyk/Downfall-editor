@@ -245,8 +245,11 @@ function drawObjectEditor(o, isSelected){
         const img = BUMP_SPRITES[0];
         ctx.imageSmoothingEnabled = false;
         const scale = GRID/img.naturalWidth, dw=GRID, dh=img.naturalHeight*scale;
-        const cx = o.x + o.w/2;
-        ctx.drawImage(img, cx-dw/2, o.y+o.h-dh, dw, dh);
+        const n = Math.max(1, Math.round(o.w/GRID));
+        for(let i=0;i<n;i++){
+          const cx = o.x + i*GRID + GRID/2;
+          ctx.drawImage(img, cx-dw/2, o.y+o.h-dh, dw, dh);
+        }
       } else {
         drawStoneBrick(o.x,o.y,o.w,o.h);
         { const cx=o.x+o.w/2, cy=o.y+o.h/2, r=Math.min(o.w,o.h)*0.28;
@@ -417,28 +420,50 @@ function drawClouds(){
 }
 
 /* Test-mode button (bump.png, 3 frames) — same logic as the game
-   (render.js), duplicated here (separate `ctx` canvas context). */
+   (render.js), duplicated here (separate `ctx` canvas context). One frame
+   per grid unit of width, all sharing the same pressPhase. */
+function buttonFrameForPhase(phase){
+  return phase<0.34 ? BUMP_SPRITES[0] : (phase<0.67 ? BUMP_SPRITES[1] : BUMP_SPRITES[2]);
+}
 function drawButtonSpriteEd(o){
   const phase = o.pressPhase || 0;
-  const img = phase<0.34 ? BUMP_SPRITES[0] : (phase<0.67 ? BUMP_SPRITES[1] : BUMP_SPRITES[2]);
+  const img = buttonFrameForPhase(phase);
+  const n = Math.max(1, Math.round(o.w/GRID));
   if(!img || !img.complete || !img.naturalWidth){
-    drawStoneBrick(o.x,o.y,o.w,o.h);
-    const cx=o.x+o.w/2, cy=o.y+o.h/2, r=Math.min(o.w,o.h)*0.28;
-    ctx.fillStyle = phase>0.5 ? "#4f8f6a" : "#8a6a3a";
-    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+    const cw = o.w/n;
+    for(let i=0;i<n;i++){
+      const sx = o.x+i*cw;
+      drawStoneBrick(sx,o.y,cw,o.h);
+      const cx=sx+cw/2, cy=o.y+o.h/2, r=Math.min(cw,o.h)*0.28;
+      ctx.fillStyle = phase>0.5 ? "#4f8f6a" : "#8a6a3a";
+      ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+    }
     return;
   }
   ctx.imageSmoothingEnabled = false;
   const scale = GRID/img.naturalWidth, dw=GRID, dh=img.naturalHeight*scale;
-  const cx = o.x + o.w/2;
-  ctx.drawImage(img, cx-dw/2, o.y+o.h-dh, dw, dh);
-}
-function playerButtonSinkOffset(){
-  let maxPhase = 0;
-  for(const o of playObjects){
-    if(o.kind==="button" && o.pressPhase>maxPhase && playOverlap(P,o)) maxPhase = o.pressPhase;
+  for(let i=0;i<n;i++){
+    const cx = o.x + i*GRID + GRID/2;
+    ctx.drawImage(img, cx-dw/2, o.y+o.h-dh, dw, dh);
   }
-  return maxPhase*8;
+}
+/* Visual sink, computed from the actual sprite geometry (same as the
+   game's render.js) rather than a guessed constant. */
+function playerButtonSinkOffset(){
+  const img0 = BUMP_SPRITES[0];
+  if(!img0.complete || !img0.naturalWidth) return 0;
+  const scale = GRID/img0.naturalWidth;
+  const dh0 = img0.naturalHeight*scale;
+  let maxSink = 0;
+  for(const o of playObjects){
+    if(o.kind!=="button" || !(o.pressPhase>0) || !playOverlap(P,o)) continue;
+    const imgCur = buttonFrameForPhase(o.pressPhase);
+    if(!imgCur.complete || !imgCur.naturalWidth) continue;
+    const dhCur = imgCur.naturalHeight*scale;
+    const sink = dh0 - dhCur;
+    if(sink>maxSink) maxSink = sink;
+  }
+  return maxSink;
 }
 
 /* Player death explosion (same logic as the game, render.js). */
@@ -1504,6 +1529,26 @@ function playResolve(dt){
      soon as the player enters it by falling/jumping in. Same fallSign logic
      as the rest of the function, same mechanic as the real game (engine.js). */
   playResolveExit(fallSign, prevBottom, prevTop);
+
+  /* Chute au centre plutôt qu'au coin arrière — même correctif que le jeu
+     (engine.js) : le joueur perd "grounded" dès que son point central
+     n'a plus de support, même si sa boîte complète chevauche encore. */
+  if(P.grounded){
+    const centerX = P.x + P.w/2;
+    const checkY = fallSign > 0 ? P.y + P.h + 1 : P.y - 1;
+    let supported = false;
+    for(const o of playObjects){
+      if(!o.solid) continue;
+      if(o.visible === false && !o.solidWhenHidden) continue;
+      const box = effectiveBox(o);
+      if(centerX >= box.x && centerX <= box.x+box.w && checkY >= box.y && checkY <= box.y+box.h){ supported = true; break; }
+    }
+    if(!supported){
+      const e = curLevel().exit;
+      if(centerX >= e.x && centerX <= e.x+e.w && checkY >= e.y && checkY <= e.y+e.h) supported = true;
+    }
+    if(!supported){ P.grounded = false; P.groundedOn = null; }
+  }
 }
 function playResolveExit(fallSign, prevBottom, prevTop){
   const e = curLevel().exit;
@@ -1583,7 +1628,7 @@ function playUpdate(dt){
       o.angle = (o.angle||0) + (o.rotateSpeed||0)*dt;
     }
     if(o.kind==="button"){
-      const pressed = playOverlap(P,o);
+      const pressed = o.triggered || playOverlap(P,o);
       o.pressPhase = approach(o.pressPhase||0, pressed?1:0, dt/0.12);
     }
   }
