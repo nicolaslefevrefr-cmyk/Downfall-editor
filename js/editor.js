@@ -1314,8 +1314,9 @@ function playApplyAction(obj, action){
         obj.state = "moving";
         if(action.duration){
           playScheduleTimer(action.duration, ()=>{
-            if(axis==="x") obj.moveX = null; else obj.moveY = null;
-            if(!obj.moveX && !obj.moveY) obj.state = "idle";
+            if(axis==="x"){ if(obj.moveX===mover) obj.moveX=null; }
+            else { if(obj.moveY===mover) obj.moveY=null; }
+            if(!obj.moveX && !obj.moveY && !obj.moveTarget) obj.state = "idle";
           });
         }
       }
