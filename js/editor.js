@@ -1501,6 +1501,7 @@ function playResolve(dt){
   const prevTop = P.y;
   const prevY = P.y;
   const wasGrounded = P.grounded;
+  const wasGroundedOnId = P.grounded ? P.groundedOn : null;
   P.grounded = false; P.groundedOn = null;
 
   P.x += P.vx*dt;
@@ -1544,9 +1545,17 @@ function playResolve(dt){
       const range = rotatedYRangeAt(o, footX);
       if(!range) continue;
       const surfaceY = fallSign>0 ? range.yTop : range.yBottom;
-      const reached = fallSign>0
-        ? (footY>=surfaceY-0.5 && footY<=surfaceY+catchWindow)
-        : (footY<=surfaceY+0.5 && footY>=surfaceY-catchWindow);
+      let reached;
+      if(o.id===wasGroundedOnId){
+        const window = Math.max(catchWindow, Math.abs(P.vx*dt)*1.5+10);
+        reached = fallSign>0
+          ? (footY>=surfaceY-window && footY<=surfaceY+window)
+          : (footY<=surfaceY+window && footY>=surfaceY-window);
+      } else {
+        reached = fallSign>0
+          ? (footY>=surfaceY-0.5 && footY<=surfaceY+catchWindow)
+          : (footY<=surfaceY+0.5 && footY>=surfaceY-catchWindow);
+      }
       if(!reached) continue;
       if(bestSurface===null || (fallSign>0 ? surfaceY<bestSurface : surfaceY>bestSurface)){
         bestSurface=surfaceY; bestObj=o;
@@ -1564,6 +1573,11 @@ function playResolve(dt){
     if(!o.solid) continue;
     if(o.visible===false && !o.solidWhenHidden) continue;
     if(o.id===landedOnId) continue;
+    /* Rotated objects never act as a horizontal wall or step (see
+       engine.js for the full rationale) — walking off a rotated
+       platform's edge is already handled by the point-based landing pass
+       above. */
+    if(o.angle) continue;
     const box = effectiveBox(o);
     const hOverlap = P.x < box.x+box.w && P.x+P.w > box.x;
     const vOverlap = prevY < box.y+box.h && prevY+P.h > box.y;
