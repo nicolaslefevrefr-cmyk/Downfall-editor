@@ -636,7 +636,7 @@ canvas.addEventListener("pointerdown", (evt)=>{
         if(!src.trap.trigger) src.trap.trigger = {type:"ON_ENTER"};
         if(!src.trap.action) src.trap.action = {type:"NONE"};
         if(!src.trap.then) src.trap.then = [];
-        src.trap.then.push({ target: hit, delay: 200, action:{type:"NONE"} });
+        src.trap.then.push({ target: hit, delay: 0, action:{type:"NONE"} });
         selectedId = linkSourceId; linkSourceId=null; mode="select";
         renderInspector(); render();
       }
@@ -1012,7 +1012,7 @@ function renderInspector(){
   });
   const addBtn = el("button",{class:"addBtn", text:"+ Add a cascade (list)", onclick:()=>{
     if(!others.length) return;
-    o.trap.then.push({ target:others[0], delay:200, action:{type:"NONE"} });
+    o.trap.then.push({ target:others[0], delay:0, action:{type:"NONE"} });
     renderInspector();
   }});
   casBox.appendChild(addBtn);
@@ -1449,10 +1449,9 @@ function playBuildLevel(){
 }
 /* An object's effective collision box: for a rotating object, we use the
    axis-aligned rectangle that exactly bounds its rotated shape (it grows/
-   shrinks with the angle). This is a simple approximation (not real
-   oriented-rectangle collision), but it keeps the physics consistent
-   with the visual rendering: the player can climb onto
-   climb onto a rotating platform and its support height follows the tilt. */
+   shrinks with the angle). Still used for the horizontal wall pass; the
+   vertical landing/bump passes below use rotatedYRangeAt instead, which
+   tracks the TRUE rotated shape rather than this bounding box. */
 function effectiveBox(o){
   if(o.angle){
     const rad = o.angle*Math.PI/180;
@@ -1463,6 +1462,31 @@ function effectiveBox(o){
     return { x:cx-bhw, y:cy-bhh, w:bhw*2, h:bhh*2 };
   }
   return o;
+}
+/* Same logic as the game's engine.js — see there for the full rationale. */
+function rotatedYRangeAt(o, worldX){
+  if(!o.angle){
+    if(worldX < o.x || worldX > o.x+o.w) return null;
+    return { yTop:o.y, yBottom:o.y+o.h };
+  }
+  const rad = o.angle*Math.PI/180;
+  const cosr = Math.cos(rad), sinr = Math.sin(rad);
+  const cx = o.x+o.w/2, cy = o.y+o.h/2, hw = o.w/2, hh = o.h/2;
+  const corner = (lx,ly) => ({ x: cx+lx*cosr-ly*sinr, y: cy+lx*sinr+ly*cosr });
+  const c1=corner(-hw,-hh), c2=corner(hw,-hh), c3=corner(hw,hh), c4=corner(-hw,hh);
+  const edges = [[c1,c2],[c2,c3],[c3,c4],[c4,c1]];
+  let yTop=Infinity, yBottom=-Infinity, found=false;
+  for(const [a,b] of edges){
+    if((a.x<=worldX && worldX<=b.x) || (b.x<=worldX && worldX<=a.x)){
+      if(a.x===b.x) continue;
+      const t=(worldX-a.x)/(b.x-a.x);
+      const y=a.y+t*(b.y-a.y);
+      found=true;
+      if(y<yTop) yTop=y;
+      if(y>yBottom) yBottom=y;
+    }
+  }
+  return found ? { yTop, yBottom } : null;
 }
 function playResolve(dt){
   /* fallSign = direction of current gravity (1 = normal, -1 = inverted).
@@ -1489,16 +1513,21 @@ function playResolve(dt){
      mismatched pixel or two. */
   const bumpInset = (P.w/2) * 0.25;
   const bumpLeft = P.x + bumpInset, bumpRight = P.x + P.w - bumpInset;
+  const bumpCenter = (bumpLeft+bumpRight)/2;
   for(const o of playObjects){
     if(!o.solid) continue;
     if(o.visible===false && !o.solidWhenHidden) continue;
-    const box = effectiveBox(o);
-    if(bumpRight<=box.x || bumpLeft>=box.x+box.w) continue;
-    if(P.y>=box.y+box.h || P.y+P.h<=box.y) continue;
+    let hitRange = null;
+    for(const sx of [bumpLeft, bumpCenter, bumpRight]){
+      const r = rotatedYRangeAt(o, sx);
+      if(r){ hitRange = r; break; }
+    }
+    if(!hitRange) continue;
+    if(P.y>=hitRange.yBottom || P.y+P.h<=hitRange.yTop) continue;
     if(fallSign>0){
-      if(P.vy<0 && prevTop>=box.y+box.h-2){ P.y=box.y+box.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
+      if(P.vy<0 && prevTop>=hitRange.yBottom-2){ P.y=hitRange.yBottom; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
     } else {
-      if(P.vy>0 && prevBottom<=box.y+2){ P.y=box.y-P.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
+      if(P.vy>0 && prevBottom<=hitRange.yTop+2){ P.y=hitRange.yTop-P.h; P.vy=0; P.lastBump={id:o.id,t:playNow}; }
     }
   }
 
@@ -1512,9 +1541,9 @@ function playResolve(dt){
     for(const o of playObjects){
       if(!o.solid) continue;
       if(o.visible===false && !o.solidWhenHidden) continue;
-      const box = effectiveBox(o);
-      if(footX<box.x || footX>box.x+box.w) continue;
-      const surfaceY = fallSign>0 ? box.y : box.y+box.h;
+      const range = rotatedYRangeAt(o, footX);
+      if(!range) continue;
+      const surfaceY = fallSign>0 ? range.yTop : range.yBottom;
       const reached = fallSign>0
         ? (footY>=surfaceY-0.5 && footY<=surfaceY+catchWindow)
         : (footY<=surfaceY+0.5 && footY>=surfaceY-catchWindow);
@@ -1904,6 +1933,7 @@ function startPlay(){
   playBuildLevel();
   playControlsEl.classList.add("show");
   document.getElementById("showHiddenToggle").classList.add("show");
+  document.body.classList.add("play-mode");
   btnPlay.textContent = "■ Back to editing";
   document.getElementById("palette").style.display="none";
   document.getElementById("inspector").style.display="none";
@@ -1914,6 +1944,7 @@ function stopPlay(){
   playRunning = false;
   playControlsEl.classList.remove("show");
   document.getElementById("showHiddenToggle").classList.remove("show");
+  document.body.classList.remove("play-mode");
   hidePlayMsg();
   btnPlay.textContent = "▶ Test level";
   document.getElementById("palette").style.display="";
@@ -1922,6 +1953,7 @@ function stopPlay(){
   render();
 }
 btnPlay.addEventListener("click", ()=>{ if(playRunning) stopPlay(); else startPlay(); });
+document.getElementById("btnExitPlay").addEventListener("click", ()=>{ if(playRunning) stopPlay(); });
 document.getElementById("chkShowHidden").addEventListener("change", (e)=>{ showHiddenInPlay = e.target.checked; });
 
 window.addEventListener("keydown",(e)=>{

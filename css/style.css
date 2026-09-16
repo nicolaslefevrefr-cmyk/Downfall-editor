@@ -12,15 +12,21 @@ body{
 }
 #app{ height:100dvh; display:flex; flex-direction:column; }
 
-/* topbar */
+/* topbar — ALWAYS a single row, regardless of portrait/landscape or
+   screen width: wrapping to a second line (the previous behavior) left
+   big empty gaps from justify-content:space-between spreading the three
+   groups apart once they no longer fit one row. If the buttons genuinely
+   don't fit, the bar scrolls horizontally instead of wrapping. */
 #topbar{
-  flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
-  gap:8px; padding:8px 10px; background:var(--panel); border-bottom:1px solid var(--border); z-index:20;
+  flex:0 0 auto; display:flex; align-items:center; flex-wrap:nowrap;
+  gap:6px; padding:7px 8px; background:var(--panel); border-bottom:1px solid var(--border); z-index:20;
+  overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch;
 }
-.tgroup{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.tgroup{ display:flex; align-items:center; gap:5px; flex-wrap:nowrap; flex:0 0 auto; }
+.tgroup + .tgroup{ margin-left:4px; }
 .tbtn{
   border:1px solid var(--border); background:#fff; color:var(--text); border-radius:9px;
-  padding:7px 11px; font-size:13px; cursor:pointer; white-space:nowrap;
+  padding:6px 9px; font-size:12.5px; cursor:pointer; white-space:nowrap; flex:0 0 auto;
 }
 .tbtn:active{ background:#eef0fb; }
 .tbtn.primary{ background:var(--accent); color:#fff; border-color:var(--accent); }
@@ -30,7 +36,7 @@ body{
 select, input[type=text], input[type=number]{
   border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:13px; background:#fff; color:var(--text);
 }
-.tcheck{ display:flex; align-items:center; gap:5px; font-size:13px; color:var(--muted); }
+.tcheck{ display:flex; align-items:center; gap:5px; font-size:13px; color:var(--muted); flex:0 0 auto; white-space:nowrap; }
 
 /* workspace: palette | canvas | inspector (the inspector is ALWAYS a
    floating panel that opens on selection, not a static column). */
@@ -76,6 +82,18 @@ select, input[type=text], input[type=number]{
   background:#dfe3f5; border-radius:14px; overflow:hidden; box-shadow:var(--shadow);
 }
 canvas{ display:block; width:100%; height:100%; touch-action:none; }
+
+/* Test mode: the top bar disappears entirely to maximize the play area —
+   only a small floating "✕" over the canvas lets you stop testing. */
+body.play-mode #topbar{ display:none; }
+#btnExitPlay{
+  display:none; position:absolute; top:10px; right:10px; z-index:15;
+  width:36px; height:36px; padding:0; border-radius:10px; border:none;
+  background:rgba(20,22,36,.55); color:#fff; font-size:16px;
+  align-items:center; justify-content:center;
+}
+body.play-mode #btnExitPlay{ display:flex; }
+#btnExitPlay:active{ background:rgba(20,22,36,.75); }
 
 #zoomBar{
   position:absolute; left:12px; bottom:12px; display:flex; align-items:center; gap:4px;
