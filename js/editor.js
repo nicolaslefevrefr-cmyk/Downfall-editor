@@ -63,6 +63,7 @@ const ACTION_TYPES = [
   { type:"MOVE", label:"Move at constant speed (MOVE)" },
   { type:"MOVE_TO", label:"Move to a fixed position (MOVE_TO)" },
   { type:"ROTATE", label:"Continuous rotation (ROTATE)" },
+  { type:"SET_FRICTION", label:"Change this block's friction (SET_FRICTION)" },
 ];
 /* Actions available on the special SCENE target (global level
    parameters) and the special PLAYER target (the character itself). */
@@ -849,9 +850,11 @@ function renderActionParams(container, action, onchange){
     container.appendChild(numField("Vitesse (px/s)", action.speed!=null?action.speed:100, v=>{ action.speed=v; onchange(); }));
     container.appendChild(numField("Acceleration (px/s², 0 = instant)", action.acceleration!=null?action.acceleration:0, v=>{ action.acceleration=v; onchange(); }));
   } else if(action.type==="ROTATE"){
-    container.appendChild(selectField("Sens", [{type:"cw",label:"Horaire"},{type:"ccw",label:"Antihoraire"}], action.direction||"cw", v=>{ action.direction=v; onchange(); }));
+    container.appendChild(selectField("Direction", [{type:"cw",label:"Clockwise"},{type:"ccw",label:"Counter-clockwise"}], action.direction||"cw", v=>{ action.direction=v; onchange(); }));
     container.appendChild(numField("Speed (degrees/s)", action.speed!=null?action.speed:90, v=>{ action.speed=v; onchange(); }));
     container.appendChild(numField("Duration (ms, 0 = indefinite)", action.duration!=null?action.duration:0, v=>{ action.duration=v; onchange(); }));
+  } else if(action.type==="SET_FRICTION"){
+    container.appendChild(numField("New friction (0 = frictionless, 1 = full grip)", action.value!=null?action.value:0, v=>{ action.value=Math.max(0,Math.min(1,v)); onchange(); }));
   } else if(action.type==="SET_GRAVITY"){
     container.appendChild(numField("New gravity (px/s²)", action.value!=null?action.value:DEFAULT_GRAVITY, v=>{ action.value=v; onchange(); }));
   } else if(action.type==="SET_SPEED"){
@@ -935,9 +938,12 @@ function renderInspector(){
   inspectorBody.appendChild(selectField("Object type (kind)", KIND_LIB.map(k=>({type:k.kind,label:k.label})), o.kind, v=>{ o.kind=v; render(); }));
 
   inspectorBody.appendChild(checkField("Solid (blocks the player)", o.solid, v=>{ o.solid=v; }));
-  inspectorBody.appendChild(checkField("Dangereux au contact (hazard)", o.hazard, v=>{ o.hazard=v; }));
+  inspectorBody.appendChild(checkField("Dangerous on contact (hazard)", o.hazard, v=>{ o.hazard=v; }));
   inspectorBody.appendChild(checkField("Visible at start", o.visible!==false, v=>{ o.visible=v; render(); }));
   inspectorBody.appendChild(checkField("Solid even hidden (otherwise: invisible = non-solid, until revealed)", o.solidWhenHidden, v=>{ o.solidWhenHidden=v; }));
+  if(o.solid){
+    inspectorBody.appendChild(numField("Friction (0 = frictionless when tilted, 1 = full grip)", o.friction!=null?o.friction:1, v=>{ o.friction=Math.max(0,Math.min(1,v)); }));
+  }
 
   if(o.kind==="hidden_spike"){
     inspectorBody.appendChild(selectField("Spike direction", [
@@ -1341,6 +1347,10 @@ function playApplyAction(obj, action){
       if(action.duration){ playScheduleTimer(action.duration, ()=>{ obj.state="idle"; obj.rotateSpeed=0; }); }
       playFireCascade(obj);
       break;
+    case "SET_FRICTION":
+      obj.friction = action.value!=null ? Math.max(0,Math.min(1,action.value)) : 0;
+      playFireCascade(obj);
+      break;
     default: playFireCascade(obj);
   }
 }
@@ -1439,7 +1449,8 @@ function playBuildLevel(){
   playObjectsById = {};
   for(const o of lvl.objects) playObjectsById[o.id]=o;
   P = { x:lvl.playerStart.x, y:lvl.playerStart.y, w:26, h:38, vx:0, vy:0, grounded:false, groundedOn:null,
-    prevGroundedOn:null, justLandedOn:null, justJumped:false, lastBump:null, lastGroundY:null, moveX:null, moveY:null, facing:1 };
+    prevGroundedOn:null, justLandedOn:null, justJumped:false, lastBump:null, lastGroundY:null, moveX:null, moveY:null, facing:1,
+    slideVx:0 };
   playTimers=[]; playNow=0; playMode="playing"; playLastCause=null; walkPhase=0; playPrevBox=null;
   currentGravity = lvl.gravity!=null ? lvl.gravity : DEFAULT_GRAVITY;
   currentMoveSpeed = DEFAULT_MOVE_SPEED;
@@ -1559,6 +1570,33 @@ function playResolve(dt){
       if(!reached) continue;
       if(bestSurface===null || (fallSign>0 ? surfaceY<bestSurface : surfaceY>bestSurface)){
         bestSurface=surfaceY; bestObj=o;
+      }
+    }
+    /* The rotating platform's edge can sweep past the player's exact
+       footX between frames — see engine.js for the full rationale.
+       Restricted to ROTATED objects only; a normal platform's edge is
+       fixed, so a genuine walk-past-the-edge there must still fall. */
+    if(!bestObj && wasGroundedOnId){
+      const o = playObjects.find(x => x.id === wasGroundedOnId);
+      if(o && o.angle && o.solid && !(o.visible===false && !o.solidWhenHidden)){
+        const searchStep = 2, maxSearch = 48;
+        let found = null, foundX = null;
+        for(let d = searchStep; d <= maxSearch && found === null; d += searchStep){
+          for(const sx of [footX - d, footX + d]){
+            const range = rotatedYRangeAt(o, sx);
+            if(!range) continue;
+            const surfaceY = fallSign>0 ? range.yTop : range.yBottom;
+            const window = Math.max(catchWindow, Math.abs(P.vx*dt)*1.5+10);
+            const reached2 = fallSign>0
+              ? (footY>=surfaceY-window && footY<=surfaceY+window)
+              : (footY<=surfaceY+window && footY>=surfaceY-window);
+            if(reached2){ found = surfaceY; foundX = sx; break; }
+          }
+        }
+        if(found !== null){
+          bestSurface = found; bestObj = o;
+          P.x += (foundX - footX);
+        }
       }
     }
     if(bestObj){
@@ -1723,6 +1761,24 @@ function playUpdate(dt){
     P.vy += P.moveY.v;
   }
 
+  /* Sliding on a tilted (rotated) block — same logic as the game's
+     engine.js. */
+  if(P.grounded && P.groundedOn){
+    const slidePlatform = playObjects.find(o => o.id === P.groundedOn);
+    if(slidePlatform && slidePlatform.angle){
+      const rad = slidePlatform.angle * Math.PI/180;
+      const friction = slidePlatform.friction != null ? slidePlatform.friction : 1;
+      const slideAccel = currentGravity * Math.sin(rad) * Math.cos(rad) * (1 - friction);
+      const maxSlide = 600;
+      P.slideVx = Math.max(-maxSlide, Math.min(maxSlide, P.slideVx + slideAccel * dt));
+    } else {
+      P.slideVx = 0;
+    }
+  } else {
+    P.slideVx = 0;
+  }
+  P.vx += P.slideVx;
+
   /* Physics substeps: at 240px/s and 60 fps, one frame moves the player
      4px, and their body is 26px wide — the real gap to cross without
      no contact at all (gap width minus player width) is often
@@ -1845,34 +1901,16 @@ function drawStickFigure(w, h, grounded, phase, dead, speedFrac){
     ctx.beginPath(); ctx.moveTo(midX, hipY); ctx.lineTo(midX+9, hipY+8); ctx.lineTo(midX+5, footY); ctx.stroke();
   }
 }
-/* Only returns the playable area (between the boundary walls): everything that
-   is outside this zone (the walls themselves, and beyond) stays black —
-   as if the boundaries were the very frame of the screen. If a level doesn't
-   have (or no longer has) its default walls, falls back to the full 800x450 world. */
-function computePlayArea(){
-  const top = playObjects.find(o=>o.id==="_boundTop");
-  const left = playObjects.find(o=>o.id==="_boundLeft");
-  const right = playObjects.find(o=>o.id==="_boundRight");
-  const x0 = left ? left.x+left.w : 0;
-  const y0 = top ? top.y+top.h : 0;
-  const x1 = right ? right.x : W;
-  /* No boundary wall at the bottom (by design) — the bottom black bar is purely a
-     crop, aligned to the top wall's real thickness to stay
-     consistent with the other three sides regardless of the level. */
-  const bottomMargin = top ? top.h : (left ? left.w : 20);
-  const y1 = H - bottomMargin;
-  return { x:x0, y:y0, w:Math.max(1,x1-x0), h:Math.max(1,y1-y0) };
-}
+/* Same rationale as the game's render.js: shows the FULL level world,
+   boundary walls included, rather than cropping them out of view. */
 function renderPlay(){
   ctx.save();
   ctx.setTransform(1,0,0,1,0,0);
   ctx.fillStyle = "#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
-  const area = computePlayArea();
-  const s = Math.min(canvas.width/area.w, canvas.height/area.h) || 1;
-  const ox = (canvas.width - area.w*s)/2 - area.x*s;
-  const oy = (canvas.height - area.h*s)/2 - area.y*s;
+  const s = Math.min(canvas.width/W, canvas.height/H) || 1;
+  const ox = (canvas.width - W*s)/2;
+  const oy = (canvas.height - H*s)/2;
   ctx.setTransform(s,0,0,s, ox, oy);
-  ctx.beginPath(); ctx.rect(area.x, area.y, area.w, area.h); ctx.clip();
 
   ctx.fillStyle = SKY_COLOR;
   ctx.fillRect(0,0,W,H);
